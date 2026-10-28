@@ -99,3 +99,8 @@
 - **Units**: only those of `DEVICE_FEATURE_UNITS_BY_CATEGORY`: % for
   battery-storage, °C for temperature-sensor, W for energy-production-sensor,
   none for unknown (the unit in the name).
+
+## Next patch
+
+- r2 minor: leftover mentions of the removed guard: `src/sax/registers.js:296` (cites `src/guard.js`), the
+  header of `test/app.test.js:4-5` and the test title at line 79, `CLAUDE.md:40` ("counters, buttons").
