@@ -11,66 +11,72 @@ Gladys through
 [`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js),
 its only runtime dependency. It started from the official JavaScript template.
 
+It reads **SAX Power Home / Home Plus** batteries over **Modbus TCP** (port
+502): the SunSpec interface documented by SAX (unit 100) and the per-battery
+registers of [sax_battery_ha](https://github.com/matfroh/sax_battery_ha)
+(units 64 and 40, Apache-2.0, see `THIRD_PARTY_NOTICES.md`). Unofficial.
+**Read-only**: never `onSetValue`, never a request but function 3. Siblings:
+`gladys-openems` (app, store, guard, session clock), `gladys-solakon` (the
+Modbus client).
+
 ## Commands
 
 ```bash
 npm install
-npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+npm test                                  # node --test --test-timeout=60000
+node --test test/reader.test.js           # one file (a fake SAX battery on 127.0.0.1)
+node --test --test-name-pattern "counter" # tests whose name matches
+npm run audit                             # npm audit --omit=dev
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
-npm run format                            # Prettier, fix in place
-npx github:GladysAssistant/integration-store .   # store admission checks
+node scripts/cover.mjs cover.png          # the store cover (800×534)
 ```
-
-The CI (`.github/workflows/ci.yml`) runs `format:check`, `lint` and `test` on
-Node 22 and 24, and builds the Docker image: run the three commands before
-pushing.
 
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
-src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
-gladys-assistant-integration.json manifest: name, config_schema, actions, image...
-docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
-.github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
+index.js                          SDK wiring only (src/handlers.js)
+src/handlers.js                   every handler, registered before connect()
+src/app.js                        SaxApp: batteries, pace, reads, identity, counters, buttons
+src/sax/reader.js                 one read of one battery: blocks, gap, sessions, skips
+src/sax/registers.js              the blocks, requests and decoders (pure, strict)
+src/sax/identity.js               the id rule: serial, else the address after 3 reads
+src/modbus/client.js              the only network access: one Modbus TCP session, one request
+src/guard.js                      plausibility of an energy counter (gladys-openems, as it is)
+src/store.js                      what /data keeps across restarts (unreadable ≠ empty)
+src/devices.js                    the devices, feature keys, catalog, states (pure)
+src/config.js                     the form, normalized
+src/constants.js                  timings, bounds, limits, manifest keys
+src/i18n.js                       runtime texts (en/fr)
+test/kit/                         copied from ~/code/ref/gladys-testkit (clock, TCP fake)
+test/helpers/fakeSax.js           a fake SAX battery on a real TCP server
 ```
 
 ## Rules
 
-- **External ids are forever.** Build them with
-  `gladys.externalIds(type, platformId)`, `platformId` being the unique id the
-  platform gives the device (serial, cloud id, MAC), never a label. Gladys keys
-  devices, their history, scenes and dashboards on them: changing one creates a
-  new device and orphans the old one. The same goes for every key users store:
-  manifest `config_schema`, `actions`, widget and scene keys, feature keys.
-- **The container rootfs is read-only.** Write only under `/data`, the one
-  writable volume. Never log tokens, passwords or API keys.
-- **Versions belong to the Release workflow** (Actions → Release). Never edit
-  `version` in `package.json` or in the manifest, nor the `docker_image` tag,
-  by hand — except on the README's hand-pushed tag path, which bumps all three
-  together before tagging. `test/manifest.test.js` checks they agree.
-- **Changelog.** Every user-visible change adds a line under `## [Unreleased]`
-  in `CHANGELOG.md` (`### Added`, `Changed`, `Fixed`, `Removed`, `Security`).
-  Never write a version heading: the Release workflow moves the section, and it
-  becomes the notes of the GitHub Release.
-- **Manifest.** Texts are multi-language objects `{ "en": ..., "fr": ... }`:
-  `label`, `description` and `placeholder` alike, never a plain string. The
-  catalog `description` holds 10 to 100 characters per language. A field the
-  older cores do not know needs a higher `gladys_version` minimum
-  (`categories`: 4.86.0; `widgets`, `scene_triggers`, `scene_actions`,
-  `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
-  code (defaults, action, scene and widget handlers): change both sides
-  together.
-- **User-facing text** is bilingual (English and French): action messages,
-  manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
-- **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
-  in English. Tests never touch the network.
+- **Read-only.** No `onSetValue`; only read requests (function 3). A command,
+  if one is ever added (the "pilot mode"), is disabled by default behind an
+  option, never a `switch`, bounded, confirmed only by a read back.
+- **One request at a time per battery**, 500 ms between two, one connection
+  per battery at a time; batteries are independent (one hanging never delays
+  another). Every wait is bounded; a late answer is never taken.
+- **Pace**: never a read faster than the interval, whatever asks. A read of an
+  old generation publishes nothing and sets no status. Each decision reads each
+  clock once. A monotonic instant belongs to its process: what crosses a
+  restart is a wall date in /data.
+- **Registers**: only those of the SAX SunSpec documentation (markers checked
+  on every read) and those of sax_battery_ha; never one guessed.
+- **Energy counters** (`COUNTERS` in `src/devices.js`): through `IndexGuard`
+  on the session clock, never 0, never a drop nor a jump without the two-click
+  action. No index of the energy monitoring; every other value is a plain
+  sensor or a measure.
+- **External ids are forever**: `battery:sn<hi>-<lo>` / `battery:ip<host>-<port>`,
+  the `FEATURE` keys, the manifest keys. A device published again never loses a
+  feature.
+- **Units**: only those of `DEVICE_FEATURE_UNITS_BY_CATEGORY` in the core.
+- **The container rootfs is read-only.** Write only `/data/sax-power-state.json`.
+- **Versions belong to the Release workflow.** Never edit `version` by hand.
+- **Changelog** under `## [Unreleased]`; **manifest** texts `{ en, fr }`;
+  UTF-8 without BOM nor control byte.
+- **Tests never leave the machine** (127.0.0.1 only); `mkdtemp` folders are
+  removed in `t.after`.

@@ -1,177 +1,99 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "SAX Power Home",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Unofficial: SAX Power Home batteries on your network over Modbus TCP, read-only.",
+    "fr": "Non officiel : batteries SAX Power Home en local par Modbus TCP, lecture seule."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-sax-power:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-sax-power/main/cover.png",
+  "categories": ["energy"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": { "en": "SAX Power Home batteries", "fr": "Batteries SAX Power Home" },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Unofficial connector, not affiliated with SAX Power. It reads your SAX Power Home or Home Plus batteries (one, or a group of up to three: the master and the others) on your network through their Modbus TCP interface (port 502), every 30 s by default: state of charge, power, temperature, cycles, capacity and two energy counters of each battery, and the values of the whole system from the master (SunSpec interface, firmware Master V61 / Gateway V54 or later). No cloud. Read-only: it never changes a setting nor steers the battery (the \"pilot mode\" of other tools is not offered). Never tested with a real device.",
+        "fr": "Connecteur non officiel, sans lien avec SAX Power. Il lit vos batteries SAX Power Home ou Home Plus (une seule, ou un groupe de trois au plus : la maîtresse et les autres) sur votre réseau par leur interface Modbus TCP (port 502), toutes les 30 s par défaut : état de charge, puissance, température, cycles, capacité et deux compteurs d'énergie de chaque batterie, et les valeurs du système entier depuis la maîtresse (interface SunSpec, firmware Master V61 / Gateway V54 ou plus récent). Sans cloud. Lecture seule : il ne change jamais un réglage et ne pilote pas la batterie (le « mode pilote » d'autres outils n'est pas proposé). Jamais testé avec un vrai appareil."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-sax-power/blob/main/docs/fr.md",
+          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-sax-power/blob/main/docs/en.md",
+          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
+      "key": "battery_a",
+      "type": "string",
       "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
+      "label": { "en": "Battery A (master)", "fr": "Batterie A (maîtresse)" },
       "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+        "en": "The IP address of the master battery (A), shown on its display, with a port only if it is not 502. Give it a fixed address in your router (the battery takes its address by DHCP). The values of the whole system are read from this one.",
+        "fr": "L'adresse IP de la batterie maîtresse (A), affichée sur son écran, avec un port seulement s'il n'est pas 502. Donnez-lui une adresse fixe dans votre box (la batterie prend son adresse par DHCP). Les valeurs du système entier sont lues sur celle-ci."
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "placeholder": { "en": "e.g. 192.168.1.50", "fr": "ex. 192.168.1.50" }
     },
     {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
-    },
-    {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "key": "battery_b",
+      "type": "string",
+      "label": { "en": "Battery B (optional)", "fr": "Batterie B (facultative)" },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "The IP address of a second battery of the group, for its own values. Leave empty with a single battery.",
+        "fr": "L'adresse IP d'une deuxième batterie du groupe, pour ses propres valeurs. Laissez vide avec une seule batterie."
       },
-      "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "placeholder": { "en": "e.g. 192.168.1.51", "fr": "ex. 192.168.1.51" }
+    },
+    {
+      "key": "battery_c",
+      "type": "string",
+      "label": { "en": "Battery C (optional)", "fr": "Batterie C (facultative)" },
+      "description": {
+        "en": "The IP address of a third battery of the group, for its own values. Leave empty otherwise.",
+        "fr": "L'adresse IP d'une troisième batterie du groupe, pour ses propres valeurs. Laissez vide sinon."
+      },
+      "placeholder": { "en": "e.g. 192.168.1.52", "fr": "ex. 192.168.1.52" }
+    },
+    {
+      "key": "poll_interval",
+      "type": "number",
+      "label": { "en": "Reading interval (seconds)", "fr": "Intervalle de lecture (secondes)" },
+      "description": {
+        "en": "How often each battery is read, from 15 to 300 seconds. Never faster, except right after you save a new address.",
+        "fr": "Fréquence de lecture de chaque batterie, de 15 à 300 secondes. Jamais plus vite, sauf juste après l'enregistrement d'une nouvelle adresse."
+      },
+      "default": 30,
+      "min": 15,
+      "max": 300
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
+      "key": "test_connection",
+      "timeout_seconds": 30,
+      "label": { "en": "Test the connection", "fr": "Tester la connexion" },
+      "description": {
+        "en": "Reads each battery once, if the reading interval allows it, and shows its serial number and a few values.",
+        "fr": "Lit une fois chaque batterie, si l'intervalle de lecture le permet, et affiche son numéro de série et quelques valeurs."
+      }
     },
     {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "accept_held_counter",
+      "timeout_seconds": 30,
+      "label": { "en": "Accept the held counter", "fr": "Accepter le compteur retenu" },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
-      },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+        "en": "Only when the status shows an energy counter held back (a drop after a reset or a battery replaced, or a jump) and it is right. First click: lists what is held. Second click (after a few seconds, within 5 min): accepts exactly that. Saving the configuration never accepts anything.",
+        "fr": "Seulement quand l'état affiche un compteur d'énergie retenu (une baisse après une remise à zéro ou une batterie remplacée, ou un saut) et qu'il est juste. Premier clic : liste ce qui est retenu. Second clic (après quelques secondes, dans les 5 min) : accepte exactement cela. Enregistrer la configuration n'accepte jamais rien."
+      }
     }
   ]
 }
