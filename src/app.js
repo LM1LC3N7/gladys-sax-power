@@ -1,9 +1,8 @@
 // -----------------------------------------------------------------------------
 // The integration itself: the SAX batteries of the configuration (battery A,
 // the master, and up to two more), each read every 30 s by default over its
-// own Modbus TCP connection (src/sax/reader.js), their devices, the energy
-// counters checked by their guards, the test and accept buttons. index.js and
-// src/handlers.js only wire the SDK handlers to it.
+// own Modbus TCP connection (src/sax/reader.js), their devices and the test
+// button. index.js and src/handlers.js only wire the SDK handlers to it.
 //
 // READ-ONLY: only read requests (function 3) ever leave (src/sax/registers.js);
 // nothing of a battery is ever set (no onSetValue at all). The "pilot mode"
@@ -21,28 +20,21 @@
 //
 // A read belongs to its generation (each start/stop opens a new one): a read
 // that ends after a restart or a new configuration publishes nothing and sets
-// no status. Identity: every read asks the serial number in the same session
-// as the values (src/sax/identity.js); the values only go to the device of
-// the battery read.
+// no status. Identity: every read asks the serial number, and again at the
+// start of every new connection of the read (src/sax/reader.js,
+// src/sax/identity.js); the values only go to the device of the battery read.
 //
 // Clocks: `monotonic` paces the reads, so that a wall clock set back never
-// stops them. The guards of the counters run on the SESSION clock: the wall
-// clock read once at the start of the process plus the monotonic time since
-// (`sessionNow`), so that NTP moving the wall clock by hours never widens nor
-// narrows their margin (lesson of gladys-p1-monitor and gladys-openems). The
-// wall clock itself only dates what /data keeps for a restart and the texts.
-// Each decision reads each clock once. A monotonic instant belongs to its
-// process: none is kept in /data.
+// stops them. The wall clock only dates what /data keeps for a restart and
+// the texts. Each decision reads each clock once. A monotonic instant belongs
+// to its process: none is kept in /data.
 // -----------------------------------------------------------------------------
 
 import { createLogger } from '@gladysassistant/integration-sdk';
 import { normalizeConfig } from './config.js';
 import {
-  ACCEPT_CONFIRM_AFTER,
-  ACCEPT_CONFIRM_WITHIN,
   ATTEMPT_SAVE_EVERY,
   CONFIG_RETRY,
-  COUNTER_LIMITS,
   FRESH_INTERVALS,
   RETRY_MAX,
   RETRY_MIN,
@@ -51,8 +43,7 @@ import {
   TEST_ANSWER_WITHIN,
   TICK,
 } from './constants.js';
-import { COUNTERS, buildDevice, ids, keysOfDevice, readStates, round } from './devices.js';
-import { IndexGuard } from './guard.js';
+import { buildDevice, ids, keysOfDevice, readStates } from './devices.js';
 import { T } from './i18n.js';
 import { tcpConnect } from './modbus/client.js';
 import { addressId, resolveIdentity, serialId, validSlot } from './sax/identity.js';
@@ -62,19 +53,6 @@ import { createFileStore, readState } from './store.js';
 const defaultTimers = { setTimeout, clearTimeout, setInterval, clearInterval };
 
 const MINUTE = 60_000;
-
-/** The value Gladys already holds for a feature of the created device, when it says so. */
-function lastValueOf(device, featureId) {
-  const feature = (device?.features ?? []).find((f) => f.external_id === featureId);
-  const raw = feature?.last_value;
-  // Strict: null, '' and a boolean are unknown, never 0 nor 1.
-  if (!(typeof raw === 'number' || (typeof raw === 'string' && raw.trim() !== ''))) {
-    return undefined;
-  }
-  const value = Number(raw);
-  const at = Date.parse(feature?.last_value_changed ?? '');
-  return Number.isFinite(value) && value > 0 && Number.isFinite(at) ? { value, at } : undefined;
-}
 
 export class SaxApp {
   constructor({
@@ -92,9 +70,6 @@ export class SaxApp {
     this.now = now;
     this.monotonic = monotonic;
     this.timers = timers;
-    /** The session clock: wall at the start of the process + monotonic elapsed since. */
-    this.wallStart = now();
-    this.monoStart = monotonic();
     this.createReader =
       createReader ??
       ((battery) =>
@@ -106,15 +81,9 @@ export class SaxApp {
     /** The batteries of the configuration, with their runtime state (see slotOf). */
     this.slots = [];
     this.saveFailed = false;
-    /** By counter feature external id: IndexGuard. */
-    this.guards = new Map();
-    /** The first click of "Accept the held counter": `{ at, listedAt, list }`, in memory only. */
-    this.pendingAccept = undefined;
     this.publishedDevices = undefined;
     /** The states sent in the last minute: `[{ at, count }]`, monotonic (STATES_PER_MINUTE). */
     this.sent = [];
-    /** By counter feature external id: the hold last logged (`direction:from`). */
-    this.loggedHolds = new Map();
     this.timer = undefined;
     this.firstRun = Promise.resolve();
     this.lastStatus = undefined;
@@ -127,20 +96,10 @@ export class SaxApp {
     this.configTimer = undefined;
   }
 
-  /** The session clock (ms since epoch): never moved by a wall clock set by NTP. */
-  sessionNow() {
-    return this.wallStart + (this.monotonic() - this.monoStart);
-  }
-
-  /** Wall minus session clock, now (the dates /data keeps are wall dates). */
-  wallOffset() {
-    return this.now() - this.sessionNow();
-  }
-
   /**
    * Reads /data. A file that cannot be read is never taken as empty: nothing
-   * is written over it (saveState), no identity is learned and no counter is
-   * published until a later start reads it.
+   * is written over it (saveState) and no identity is learned until a later
+   * start reads it.
    */
   loadStore() {
     const loaded = this.store.load();
@@ -205,7 +164,7 @@ export class SaxApp {
     }
   }
 
-  /** `fresh`: the user saved the form (not a reconnection). It accepts no counter held back. */
+  /** `fresh`: the user saved the form (not a reconnection). */
   start(raw = {}, { fresh = false } = {}) {
     if (fresh) {
       // A save wins over a getConfig() still being retried.
@@ -261,7 +220,6 @@ export class SaxApp {
       id: undefined,
       note: undefined,
       outcomes: undefined,
-      partial: undefined,
     };
   }
 
@@ -271,7 +229,6 @@ export class SaxApp {
     if (this.storeUnreadable) {
       // Read again: maybe readable now (never taken as empty meanwhile).
       this.loadStore();
-      this.guards.clear();
     }
     this.config = normalizeConfig(raw);
     const previous = this.slots;
@@ -304,7 +261,7 @@ export class SaxApp {
     // The reads running (if any) are cut: one connection per battery at a time.
     for (const slot of this.slots) slot.reader.abort?.();
     await Promise.all(this.slots.map((s) => s.busy));
-    // /data written on a clean stop too (the last state of the counters).
+    // /data written on a clean stop too.
     await this.saveState();
   }
 
@@ -418,15 +375,6 @@ export class SaxApp {
       .map((s) => this.idOf(s))
       .find((x) => x && ids(this.gladys, x).device === device?.external_id);
     if (!id) return;
-    // A new device: no reference of its counters yet (nor a state kept in
-    // /data for a deleted device of the same id).
-    const external = ids(this.gladys, id);
-    for (const { key } of COUNTERS) {
-      const fid = external.feature(key);
-      this.guards.delete(fid);
-      delete this.kept.counters[fid];
-    }
-    await this.saveState({ force: true });
     const slot = this.slotOfDevice(device);
     if (slot) await this.publishLast(slot);
   }
@@ -440,10 +388,7 @@ export class SaxApp {
   async publishLast(slot) {
     const generation = this.generation;
     if (!this.isFresh(slot)) return;
-    const prepared = this.afterSave(
-      this.prepare(slot, slot.values, { counters: false }),
-      await this.saveState(),
-    );
+    const prepared = this.prepare(slot, slot.values);
     if (prepared && generation === this.generation) {
       await this.send(prepared);
       if (generation === this.generation) await this.updateStatus();
@@ -455,22 +400,12 @@ export class SaxApp {
   /**
    * Keeps the state in /data when it changed; false when it could not (or
    * must not: an unreadable file is never written over). The instant of the
-   * last read is written at most once a minute. A counter not loaded in
-   * memory keeps what /data had.
+   * last read is written at most once a minute.
    */
   async saveState({ force = false } = {}) {
     if (this.storeUnreadable) {
       return false;
     }
-    const counters = Object.assign(Object.create(null), this.kept.counters);
-    const offset = this.wallOffset();
-    const toWall = (ref) =>
-      ref && Number.isFinite(ref.at) ? { ...ref, at: ref.at + offset } : ref;
-    for (const [id, guard] of this.guards) {
-      const state = guard.state();
-      counters[id] = { guard: { last: toWall(state.last), held: toWall(state.held) } };
-    }
-    this.kept.counters = counters;
     const now = this.now();
     const attempt =
       this.kept.lastAttemptAt !== this.savedAttemptAt &&
@@ -481,7 +416,6 @@ export class SaxApp {
       lastAttemptAt: attempt,
       slots: this.kept.slots,
       info: this.kept.info,
-      counters,
     };
     const key = JSON.stringify(state);
     if (!force && key === this.savedKey && !this.saveFailed) {
@@ -500,18 +434,6 @@ export class SaxApp {
       this.saveFailed = true;
       return false;
     }
-  }
-
-  /**
-   * The states to send after a save: without the counters when /data could
-   * not be written, so Gladys never gets a counter /data does not know; the
-   * other values go.
-   */
-  afterSave(states, saved) {
-    if (!states || saved) return states;
-    const keys = new Set(COUNTERS.map(({ key }) => key));
-    const kept = states.filter((s) => !keys.has(s.device_feature_external_id.split(':').at(-1)));
-    return kept.length > 0 ? kept : undefined;
   }
 
   // --- Reads -------------------------------------------------------------------------
@@ -600,7 +522,6 @@ export class SaxApp {
     slot.retryAtMono = undefined;
     slot.lastError = undefined;
     slot.outcomes = result.outcomes;
-    slot.partial = result.error;
     let identity;
     if (this.storeUnreadable) {
       // /data unreadable is not empty: only a serial read now names the battery.
@@ -629,10 +550,9 @@ export class SaxApp {
     slot.values = identity.id ? { ...result.values } : undefined;
     slot.valuesAt = this.monotonic();
     slot.readAt = this.now();
-    const states = identity.id ? this.prepare(slot, slot.values, { counters: true }) : undefined;
-    // Saved BEFORE Gladys gets the values; a counter only goes once /data
-    // holds it (a failed write sends the other values only).
-    const prepared = this.afterSave(states, await this.saveState());
+    const prepared = identity.id ? this.prepare(slot, slot.values) : undefined;
+    // The identity learned is in /data before Gladys gets the values.
+    await this.saveState();
     if (!alive()) return;
     if (prepared) await this.send(prepared);
     if (!alive()) return;
@@ -653,69 +573,13 @@ export class SaxApp {
     if (alive()) await this.updateStatus();
   }
 
-  /** The guard of a counter of a created device, from Gladys and /data, on the session clock. */
-  guardOf(created, id) {
-    if (!this.guards.has(id)) {
-      const saved = this.kept.counters[id];
-      const sessionNow = this.sessionNow();
-      // /data and Gladys hold wall dates: back to the session clock, never "in the future".
-      const offset = this.now() - sessionNow;
-      const toSession = (ref) =>
-        ref && Number.isFinite(ref.at) ? { ...ref, at: ref.at - offset } : ref;
-      const clamp = (ref) =>
-        ref && Number.isFinite(ref.at) ? { ...ref, at: Math.min(ref.at, sessionNow) } : ref;
-      const guardState = saved?.guard
-        ? { ...saved.guard, last: clamp(toSession(saved.guard.last)) }
-        : saved?.guard;
-      this.guards.set(
-        id,
-        new IndexGuard(
-          clamp(toSession(lastValueOf(created, id))),
-          guardState,
-          sessionNow,
-          COUNTER_LIMITS,
-        ),
-      );
-    }
-    return this.guards.get(id);
-  }
-
-  /**
-   * The states of a read of `slot`, the counters through their guards (not
-   * sent yet: `send` does it, after /data is saved). Undefined without a
-   * created device. `counters`: a new read (the counters are taken);
-   * otherwise (a device just created) the last accepted values only.
-   */
-  prepare(slot, values, { counters }) {
+  /** The states of a read of `slot` for its created device (undefined without one). */
+  prepare(slot, values) {
     const created = this.createdDevice(slot.id);
     if (!created) return undefined;
     const external = ids(this.gladys, slot.id);
-    const now = this.sessionNow();
     const features = keysOfDevice(created);
-    const out = {};
-    for (const { name, key, value } of COUNTERS) {
-      // /data unreadable: no counter (it could not be kept), the other values go.
-      if (!features.has(key) || this.storeUnreadable) continue;
-      const id = external.feature(key);
-      const guard = this.guardOf(created, id);
-      const read = values[value] === undefined ? undefined : round(values[value], 3);
-      if (!counters || read === undefined) {
-        out[key] = guard.held ? guard.last?.value : undefined;
-        continue;
-      }
-      const plausible = guard.accept(read, now);
-      const held = guard.held ? `${guard.held.direction}:${guard.held.from}` : undefined;
-      if (held && this.loggedHolds.get(id) !== held) {
-        this.logger.warn(
-          `SAX ${name} counter ${guard.held.direction === 'down' ? 'drop' : 'jump'} held back on ${slot.battery.address}: the "Accept the held counter" button takes it`,
-        );
-      }
-      if (held) this.loggedHolds.set(id, held);
-      else this.loggedHolds.delete(id);
-      // While a value is held, the last accepted one is sent again (no delta).
-      out[key] = plausible ? read : guard.held ? guard.last?.value : undefined;
-    }
-    const states = readStates(external, values, out).filter((s) =>
+    const states = readStates(external, values).filter((s) =>
       features.has(s.device_feature_external_id.split(':').at(-1)),
     );
     return states.length > 0 ? states : undefined;
@@ -747,28 +611,6 @@ export class SaxApp {
   }
 
   // --- Status ------------------------------------------------------------------------
-
-  /** Every counter held back: `{ id, name, battery, direction, from, to }`. */
-  heldList() {
-    const list = [];
-    if (this.storeUnreadable) return list;
-    const seen = new Set();
-    for (const slot of this.slots) {
-      const pid = this.idOf(slot);
-      const created = this.createdDevice(pid);
-      if (!created || seen.has(pid)) continue;
-      seen.add(pid);
-      const features = keysOfDevice(created);
-      const external = ids(this.gladys, pid);
-      for (const { name, key } of COUNTERS) {
-        if (!features.has(key)) continue;
-        const id = external.feature(key);
-        const held = this.guardOf(created, id).held;
-        if (held) list.push({ id, name, battery: slot.battery.field, ...held });
-      }
-    }
-    return list;
-  }
 
   /** What the texts say of a battery. */
   viewOf(slot, { now, mono }) {
@@ -814,8 +656,6 @@ export class SaxApp {
     const notes = [];
     if (this.storeUnreadable) notes.push(T.notes.storeUnreadable);
     else if (this.saveFailed) notes.push(T.notes.storeFailed);
-    const held = this.heldList();
-    if (held.length > 0) notes.push(T.notes.held(held));
     if (views.every((v) => v.error)) {
       await this.setStatus(false, T.failing(views, notes));
       return;
@@ -832,62 +672,7 @@ export class SaxApp {
     await this.setStatus(true, T.ok(views, notes));
   }
 
-  // --- Configuration screen buttons -------------------------------------------------
-
-  /**
-   * "Accept the held counter", in two clicks: the first lists every counter
-   * held (nothing is accepted), the second, from 3 s to 5 min later, accepts
-   * exactly what the first listed, and only when it still shows that value
-   * (or what may have come since: src/guard.js). A save of the form never
-   * accepts.
-   */
-  async acceptHeldCounter() {
-    const list = this.heldList();
-    const mono = this.monotonic();
-    const now = this.sessionNow();
-    const pending = this.pendingAccept;
-    this.pendingAccept = undefined;
-    const elapsed = pending ? mono - pending.at : undefined;
-    if (!pending || elapsed > ACCEPT_CONFIRM_WITHIN || elapsed < ACCEPT_CONFIRM_AFTER) {
-      if (list.length === 0) {
-        return T.accept.nothing;
-      }
-      this.pendingAccept = { at: mono, listedAt: now, list };
-      return T.accept.confirm(list, ACCEPT_CONFIRM_WITHIN);
-    }
-    const accepted = [];
-    const changed = [];
-    for (const entry of pending.list) {
-      const guard = this.guards.get(entry.id);
-      const held = guard?.held;
-      const margin = guard ? guard.margin(pending.listedAt, now) : 0;
-      // The value listed, or what the counter may have added since.
-      const same =
-        held &&
-        held.direction === entry.direction &&
-        held.from === entry.from &&
-        held.to >= entry.to &&
-        held.to - entry.to <= margin;
-      if (same && guard.acceptHeld()) {
-        accepted.push({ ...entry, to: held.to });
-      } else if (held) {
-        changed.push(entry);
-      }
-    }
-    if (accepted.length === 0 && changed.length === 0) {
-      return T.accept.nothing;
-    }
-    for (const { name, direction, battery } of accepted) {
-      this.logger.info(
-        `SAX ${name} counter of ${battery} ${direction === 'down' ? 'drop' : 'jump'} accepted by the user`,
-      );
-    }
-    await this.saveState();
-    // Published at the next read (never a read sooner than the interval).
-    const taken = new Set(accepted.map((h) => h.id));
-    const stillHeld = this.heldList().some((h) => !taken.has(h.id));
-    return T.accept.done(accepted, changed, stillHeld);
-  }
+  // --- Configuration screen button ------------------------------------------------
 
   /**
    * The test button: a read of every battery whose read is due (the

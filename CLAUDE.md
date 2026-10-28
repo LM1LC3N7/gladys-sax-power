@@ -16,7 +16,7 @@ It reads **SAX Power Home / Home Plus** batteries over **Modbus TCP** (port
 registers of [sax_battery_ha](https://github.com/matfroh/sax_battery_ha)
 (units 64 and 40, Apache-2.0, see `THIRD_PARTY_NOTICES.md`). Unofficial.
 **Read-only**: never `onSetValue`, never a request but function 3. Siblings:
-`gladys-openems` (app, store, guard, session clock), `gladys-solakon` (the
+`gladys-openems` (app, store), `gladys-solakon` (the
 Modbus client).
 
 ## Commands
@@ -42,7 +42,6 @@ src/sax/reader.js                 one read of one battery: blocks, gap, sessions
 src/sax/registers.js              the blocks, requests and decoders (pure, strict)
 src/sax/identity.js               the id rule: serial, else the address after 3 reads
 src/modbus/client.js              the only network access: one Modbus TCP session, one request
-src/guard.js                      plausibility of an energy counter (gladys-openems, as it is)
 src/store.js                      what /data keeps across restarts (unreadable ≠ empty)
 src/devices.js                    the devices, feature keys, catalog, states (pure)
 src/config.js                     the form, normalized
@@ -66,10 +65,9 @@ test/helpers/fakeSax.js           a fake SAX battery on a real TCP server
   restart is a wall date in /data.
 - **Registers**: only those of the SAX SunSpec documentation (markers checked
   on every read) and those of sax_battery_ha; never one guessed.
-- **Energy counters** (`COUNTERS` in `src/devices.js`): through `IndexGuard`
-  on the session clock, never 0, never a drop nor a jump without the two-click
-  action. No index of the energy monitoring; every other value is a plain
-  sensor or a measure.
+- **Energy counters**: plain sensors published as read (`positive`: 0 is
+  unknown), never an index of the energy monitoring: SAX does not document
+  them (16-bit, may start over or be periodic). No guard, no accept action.
 - **External ids are forever**: `battery:sn<hi>-<lo>` / `battery:ip<host>-<port>`,
   the `FEATURE` keys, the manifest keys. A device published again never loses a
   feature.

@@ -173,3 +173,48 @@ test('a connection that never opens or a device that never answers: bounded', as
   aborted.abort();
   await assert.rejects(aborted.promise, (err) => err.kind === ERROR_KINDS.ABORTED);
 });
+
+test('a connection that never completes is cut at its timeout: unreachable, nothing sent', async () => {
+  const { EventEmitter } = await import('node:events');
+  const sockets = [];
+  const connect = () => {
+    const socket = new EventEmitter();
+    socket.destroyed = false;
+    socket.destroy = () => {
+      socket.destroyed = true;
+    };
+    socket.write = () => {
+      throw new Error('never written');
+    };
+    sockets.push(socket);
+    return socket;
+  };
+  const started = performance.now();
+  // Unref'd timers and a deadline of the test: a regression never holds the runner.
+  const timers = {
+    setTimeout: (fn, ms) => setTimeout(fn, ms).unref(),
+    clearTimeout: (h) => clearTimeout(h),
+  };
+  const opened = openSession({ host: 'x', port: 502, connect, timeoutMs: 80, timers });
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(resolve, 2000);
+  });
+  const outcome = await Promise.race([
+    opened.promise.then(
+      () => 'open',
+      (err) => err,
+    ),
+    deadline,
+  ]);
+  clearTimeout(timer);
+  assert.ok(outcome instanceof Error, 'cut by its timeout, not by the deadline of the test');
+  await assert.rejects(opened.promise, (err) => {
+    assert.equal(err.kind, ERROR_KINDS.UNREACHABLE);
+    assert.equal(err.message, 'connection timeout');
+    return true;
+  });
+  const took = performance.now() - started;
+  assert.ok(took >= 70 && took < 1000, `${took} ms`);
+  assert.equal(sockets[0].destroyed, true);
+});

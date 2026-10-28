@@ -26,6 +26,7 @@ import {
 } from '../constants.js';
 import { ERROR_KINDS, ModbusError, openSession, tcpConnect } from '../modbus/client.js';
 import {
+  BLOCK,
   BLOCKS,
   checksPass,
   decodeBlock,
@@ -118,7 +119,7 @@ export class BatteryReader {
     const words = parseRead(count, pdu);
     if (!words) {
       // Of the right function and transaction, but not the size asked: odd, the session ends.
-      session.abort('odd answer');
+      session.fail(new ModbusError(ERROR_KINDS.PROTOCOL, 'answer of another size'));
       throw new ModbusError(ERROR_KINDS.PROTOCOL, 'answer of another size');
     }
     return words;
@@ -164,11 +165,20 @@ export class BatteryReader {
    * the kind of the first failure (for the status).
    */
   async read({ identityRequired = false } = {}) {
-    const run = { aborted: false, session: undefined, opening: undefined, wake: undefined };
+    const run = {
+      aborted: false,
+      overBudget: false,
+      session: undefined,
+      opening: undefined,
+      wake: undefined,
+    };
     this.current = run;
     this.reads += 1;
     const budget = this.timers.setTimeout(() => {
-      if (this.current === run) this.abort();
+      if (this.current !== run) return;
+      // Over budget: a failure of the battery (timeout), not a stop.
+      run.overBudget = true;
+      this.abort();
     }, TIMINGS.readBudget);
     const result = {
       reached: false,
@@ -219,6 +229,25 @@ export class BatteryReader {
             continue;
           }
           result.reached = true;
+          // A new connection of the same read: the battery that answers it is
+          // the one identified at the start of the read, or nothing more is taken.
+          if (sessions > 1 && result.identity?.serial) {
+            const check = await this.readBlock(run, run.session, BLOCK.identity, {
+              ...this.blocks.get('identity'),
+            });
+            const serial =
+              check.outcome === OUTCOME.OK ? decodeIdentity(check.map)?.serial : undefined;
+            if (run.aborted) continue;
+            if (serial !== result.identity.serial) {
+              result.error ??=
+                check.outcome === OUTCOME.FAILED
+                  ? (run.session.dead?.kind ?? ERROR_KINDS.CLOSED)
+                  : ERROR_KINDS.PROTOCOL;
+              result.identityLost = true;
+              for (const b of BLOCKS) result.outcomes[b.key] ??= OUTCOME.SKIPPED;
+              break;
+            }
+          }
         }
         const session = run.session;
         const { outcome, map, alive } = await this.readBlock(run, session, block, state);
@@ -250,7 +279,10 @@ export class BatteryReader {
       if (run.session) await run.session.close();
       if (this.current === run) this.current = undefined;
     }
-    if (run.aborted) result.error = ERROR_KINDS.ABORTED;
+    if (run.aborted) {
+      if (run.overBudget) result.error ??= ERROR_KINDS.TIMEOUT;
+      else result.error = ERROR_KINDS.ABORTED;
+    }
     return result;
   }
 }

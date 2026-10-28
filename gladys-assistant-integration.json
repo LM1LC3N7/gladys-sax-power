@@ -16,7 +16,10 @@
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "SAX Power Home batteries", "fr": "Batteries SAX Power Home" },
+      "label": {
+        "en": "SAX Power Home batteries",
+        "fr": "Batteries SAX Power Home"
+      },
       "description": {
         "en": "Unofficial connector, not affiliated with SAX Power. It reads your SAX Power Home or Home Plus batteries (one, or a group of up to three: the master and the others) on your network through their Modbus TCP interface (port 502), every 30 s by default: state of charge, power, temperature, cycles, capacity and two energy counters of each battery, and the values of the whole system from the master (SunSpec interface, firmware Master V61 / Gateway V54 or later). No cloud. Read-only: it never changes a setting nor steers the battery (the \"pilot mode\" of other tools is not offered). Never tested with a real device.",
         "fr": "Connecteur non officiel, sans lien avec SAX Power. Il lit vos batteries SAX Power Home ou Home Plus (une seule, ou un groupe de trois au plus : la maîtresse et les autres) sur votre réseau par leur interface Modbus TCP (port 502), toutes les 30 s par défaut : état de charge, puissance, température, cycles, capacité et deux compteurs d'énergie de chaque batterie, et les valeurs du système entier depuis la maîtresse (interface SunSpec, firmware Master V61 / Gateway V54 ou plus récent). Sans cloud. Lecture seule : il ne change jamais un réglage et ne pilote pas la batterie (le « mode pilote » d'autres outils n'est pas proposé). Jamais testé avec un vrai appareil."
@@ -24,11 +27,17 @@
       "links": [
         {
           "url": "https://github.com/LM1LC3N7/gladys-sax-power/blob/main/docs/fr.md",
-          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+          "label": {
+            "en": "Guide (French)",
+            "fr": "Guide (français)"
+          }
         },
         {
           "url": "https://github.com/LM1LC3N7/gladys-sax-power/blob/main/docs/en.md",
-          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
+          "label": {
+            "en": "Guide (English)",
+            "fr": "Guide (anglais)"
+          }
         }
       ]
     },
@@ -36,37 +45,58 @@
       "key": "battery_a",
       "type": "string",
       "required": true,
-      "label": { "en": "Battery A (master)", "fr": "Batterie A (maîtresse)" },
+      "label": {
+        "en": "Battery A (master)",
+        "fr": "Batterie A (maîtresse)"
+      },
       "description": {
         "en": "The IP address of the master battery (A), shown on its display, with a port only if it is not 502. Give it a fixed address in your router (the battery takes its address by DHCP). The values of the whole system are read from this one.",
         "fr": "L'adresse IP de la batterie maîtresse (A), affichée sur son écran, avec un port seulement s'il n'est pas 502. Donnez-lui une adresse fixe dans votre box (la batterie prend son adresse par DHCP). Les valeurs du système entier sont lues sur celle-ci."
       },
-      "placeholder": { "en": "e.g. 192.168.1.50", "fr": "ex. 192.168.1.50" }
+      "placeholder": {
+        "en": "e.g. 192.168.1.50",
+        "fr": "ex. 192.168.1.50"
+      }
     },
     {
       "key": "battery_b",
       "type": "string",
-      "label": { "en": "Battery B (optional)", "fr": "Batterie B (facultative)" },
+      "label": {
+        "en": "Battery B (optional)",
+        "fr": "Batterie B (facultative)"
+      },
       "description": {
         "en": "The IP address of a second battery of the group, for its own values. Leave empty with a single battery.",
         "fr": "L'adresse IP d'une deuxième batterie du groupe, pour ses propres valeurs. Laissez vide avec une seule batterie."
       },
-      "placeholder": { "en": "e.g. 192.168.1.51", "fr": "ex. 192.168.1.51" }
+      "placeholder": {
+        "en": "e.g. 192.168.1.51",
+        "fr": "ex. 192.168.1.51"
+      }
     },
     {
       "key": "battery_c",
       "type": "string",
-      "label": { "en": "Battery C (optional)", "fr": "Batterie C (facultative)" },
+      "label": {
+        "en": "Battery C (optional)",
+        "fr": "Batterie C (facultative)"
+      },
       "description": {
         "en": "The IP address of a third battery of the group, for its own values. Leave empty otherwise.",
         "fr": "L'adresse IP d'une troisième batterie du groupe, pour ses propres valeurs. Laissez vide sinon."
       },
-      "placeholder": { "en": "e.g. 192.168.1.52", "fr": "ex. 192.168.1.52" }
+      "placeholder": {
+        "en": "e.g. 192.168.1.52",
+        "fr": "ex. 192.168.1.52"
+      }
     },
     {
       "key": "poll_interval",
       "type": "number",
-      "label": { "en": "Reading interval (seconds)", "fr": "Intervalle de lecture (secondes)" },
+      "label": {
+        "en": "Reading interval (seconds)",
+        "fr": "Intervalle de lecture (secondes)"
+      },
       "description": {
         "en": "How often each battery is read, from 15 to 300 seconds. Never faster, except right after you save a new address.",
         "fr": "Fréquence de lecture de chaque batterie, de 15 à 300 secondes. Jamais plus vite, sauf juste après l'enregistrement d'une nouvelle adresse."
@@ -80,19 +110,13 @@
     {
       "key": "test_connection",
       "timeout_seconds": 30,
-      "label": { "en": "Test the connection", "fr": "Tester la connexion" },
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion"
+      },
       "description": {
         "en": "Reads each battery once, if the reading interval allows it, and shows its serial number and a few values.",
         "fr": "Lit une fois chaque batterie, si l'intervalle de lecture le permet, et affiche son numéro de série et quelques valeurs."
-      }
-    },
-    {
-      "key": "accept_held_counter",
-      "timeout_seconds": 30,
-      "label": { "en": "Accept the held counter", "fr": "Accepter le compteur retenu" },
-      "description": {
-        "en": "Only when the status shows an energy counter held back (a drop after a reset or a battery replaced, or a jump) and it is right. First click: lists what is held. Second click (after a few seconds, within 5 min): accepts exactly that. Saving the configuration never accepts anything.",
-        "fr": "Seulement quand l'état affiche un compteur d'énergie retenu (une baisse après une remise à zéro ou une batterie remplacée, ou un saut) et qu'il est juste. Premier clic : liste ce qui est retenu. Second clic (après quelques secondes, dans les 5 min) : accepte exactement cela. Enregistrer la configuration n'accepte jamais rien."
       }
     }
   ]

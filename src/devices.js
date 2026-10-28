@@ -13,9 +13,9 @@
 //   `battery-storage` charge / discharge index, no `grid-sensor`), never
 //   publishEnergyConsumption: the meaning, unit and direction of the two
 //   energy registers are not documented by SAX (TODO.md); they are plain
-//   sensors, kWh in the name, never counted;
-// - those two counters still go through the guard (src/guard.js): never 0,
-//   never a drop nor a jump published without the user (src/app.js);
+//   sensors, kWh in the name, never counted, published as read (they may
+//   start over or be periodic: to confirm on a real battery); 0 is unknown,
+//   never published;
 // - every power whose sign SAX does not document is ONE signed plain sensor,
 //   never split, never `grid-sensor`; the solar power (ADW200 meter) is a
 //   power of `energy-production-sensor`, never an index;
@@ -62,23 +62,13 @@ export const FEATURE = {
   GRID_POWER: 'grid_power',
 };
 
-/**
- * The guarded counters: their feature, the value of src/sax/registers.js
- * they show (kWh) and their name in the texts (src/i18n.js).
- */
-export const COUNTERS = [
-  { name: 'produced', key: FEATURE.ENERGY_PRODUCED, value: 'energyProduced' },
-  { name: 'consumed', key: FEATURE.ENERGY_CONSUMED, value: 'energyConsumed' },
-];
-
 /** The external ids of the battery of platform id `id`. */
 export const ids = (gladys, id) => gladys.externalIds(EXTERNAL_ID_TYPE, id);
 
 // --- The catalog ------------------------------------------------------------------
 //
-// Each entry: the feature key, the value of src/sax/registers.js it shows
-// (undefined for a counter: the guard gives it), its rounding, how it is
-// declared, `master` for the values of the whole system (battery A only), and
+// Each entry: the feature key, the value of src/sax/registers.js it shows,
+// its rounding, how it is declared, `positive` (0 is unknown), `master` for the values of the whole system (battery A only), and
 // `meter` for the values of the ADW200 meter (published only when it reads).
 
 const def = (key, value, digits, spec, extra = {}) => ({ key, value, digits, spec, ...extra });
@@ -91,6 +81,8 @@ const signedWatts = (name) => plain(name, { min: -POWER_MAX * 5, max: POWER_MAX 
 const watts = (name) => plain(`${name} (W)`, { max: POWER_MAX * 5 });
 const counter = (name) =>
   plain(`${name} (kWh, as the battery counts it, not counted)`, { max: ENERGY_MAX });
+/** A counter as read: never 0 (an unset register), never summed. */
+const asRead = { positive: true };
 const level = (name) => ({
   ...measure(name, C.BATTERY_STORAGE, T.BATTERY_STORAGE.BATTERY_LEVEL),
   unit: U.PERCENT,
@@ -110,8 +102,8 @@ export const CATALOG = [
   def(FEATURE.TEMPERATURE, 'temperature', 1, celsius('Battery temperature')),
   def(FEATURE.CYCLES, 'cycles', 0, code('Charge cycles', 100_000)),
   def(FEATURE.CAPACITY, 'capacity', 2, plain('Capacity (kWh)', { max: 1000 })),
-  def(FEATURE.ENERGY_PRODUCED, undefined, 3, counter('Energy produced')),
-  def(FEATURE.ENERGY_CONSUMED, undefined, 3, counter('Energy consumed')),
+  def(FEATURE.ENERGY_PRODUCED, 'energyProduced', 3, counter('Energy produced'), asRead),
+  def(FEATURE.ENERGY_CONSUMED, 'energyConsumed', 3, counter('Energy consumed'), asRead),
   def(FEATURE.SYSTEM_SOC, 'systemSoc', 0, level('State of charge (whole system)'), {
     master: true,
   }),
@@ -243,29 +235,17 @@ export const round = (value, digits) => {
 
 const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
 
-const COUNTER_KEYS = new Set(COUNTERS.map((c) => c.key));
-
 /** Whether the ADW200 meter reads: the mean grid voltage of the SunSpec meter model. */
 export const meterPresent = (values) =>
   isNumber(values?.gridVoltage) && values.gridVoltage >= METER_VOLTAGE_MIN;
 
-/**
- * The states of a read. `values`: src/sax/registers.js; `counters`: by
- * feature key, the values the guards let through (undefined: not published
- * this time). A counter is never taken from `values` directly.
- */
-export function readStates(external, values, counters = {}) {
+/** The states of a read. `values`: src/sax/registers.js. */
+export function readStates(external, values) {
   const states = [];
   const meter = meterPresent(values);
-  for (const { key, value, digits, spec, meter: needsMeter } of CATALOG) {
-    let v;
-    if (COUNTER_KEYS.has(key)) {
-      // Never 0 (the guard never lets 0 through, checked again here).
-      v = isNumber(counters[key]) && counters[key] > 0 ? counters[key] : undefined;
-    } else if (value !== undefined && (!needsMeter || meter)) {
-      v = values[value];
-    }
-    if (!isNumber(v)) {
+  for (const { key, value, digits, spec, meter: needsMeter, positive } of CATALOG) {
+    const v = !needsMeter || meter ? values[value] : undefined;
+    if (!isNumber(v) || (positive && v <= 0)) {
       continue;
     }
     const r = round(v, digits);

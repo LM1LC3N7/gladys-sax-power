@@ -67,8 +67,11 @@ of the system. Add B and C only to see each battery's own values.
 
 ## Identity of each battery
 
-- Every read reads the **serial number** of the SunSpec interface in the same
-  connection as the values; the values only go to the device of that number.
+- Every read reads the **serial number** of the SunSpec interface (with its
+  fixed words "SunS", model 1 of length 15 and "SAXPOWER"); when the read has
+  to open a new connection, it reads it again first, and another battery at
+  that address gives nothing there. The values only go to the device of that
+  number.
 - A battery without the SunSpec interface (an older firmware, or a battery of a
   group that leaves it to the master) is named after its address
   (`ip192-168-1-51-502`) after three reads where its unit 64 answered and its
@@ -79,25 +82,15 @@ of the system. Add B and C only to see each battery's own values.
 - Another serial number at the same address: another battery, its own device
   appears in Discovery; the old one gets no value any more.
 
-## Energy counters held back
+## Energy counters
 
-The two energy counters of each battery go through a guard:
-
-- 0 is never published;
-- a **drop** (a reset, a battery replaced, or a 16-bit counter starting over)
-  or an implausible **jump** (more than 20 kW on average since the last value,
-  with 0.5 kWh of margin) is **held back**: the last accepted value is sent
-  again, the status of the integration shows it; neither time nor repetition
-  lets it go (a value back to normal ends the hold);
-- if it is right, click "Accept the held counter" **twice** in the
-  configuration: the first click lists what is held, the second (3 s to 5 min
-  later) accepts exactly that; saving the configuration accepts nothing.
-
-The guard counts on the session clock (the time at the start plus the time
-elapsed measured by the system), not on the wall clock: a time set by NTP
-while it runs does not widen its margin. What it keeps in /data survives a
-restart, as wall dates: one case aside, a system clock hours ahead when the
-container starts again widens the margin of the first values by those hours.
+The two counters "energy produced" and "energy consumed" of each battery are
+published **as read**, as plain sensors (kWh), never counted by the energy
+monitoring. SAX documents neither their direction, nor their unit, nor their
+nature: they are 16-bit registers that may **start over from zero** (near
+65.5 kWh if they are in Wh) or be **periodic** (reset now and then). To be
+confirmed on a real battery. A value of 0 is taken as unknown and never
+published.
 
 ## What is not done
 
@@ -114,4 +107,5 @@ container starts again widens the margin of the first values by those hours.
 - "serial number (SunSpec)" never read on the master: the firmware is probably
   older than Master V61 / Gateway V54; the system values are then missing.
 - /data unreadable: the file is left as it is, no battery is named after its
-  address and the counters are not sent; restart the integration.
+  address (a battery identified by its serial number is still read); restart
+  the integration.

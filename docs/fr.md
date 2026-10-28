@@ -69,9 +69,11 @@ chaque batterie.
 
 ## Identité de chaque batterie
 
-- Chaque lecture lit le **numéro de série** de l'interface SunSpec dans la
-  même connexion que les valeurs ; les valeurs ne vont qu'à l'appareil de ce
-  numéro.
+- Chaque lecture lit le **numéro de série** de l'interface SunSpec (avec ses
+  valeurs fixes « SunS », modèle 1 de longueur 15 et « SAXPOWER ») ; si la
+  lecture doit ouvrir une nouvelle connexion, elle le relit d'abord, et une
+  autre batterie à cette adresse n'y donne rien. Les valeurs ne vont qu'à
+  l'appareil de ce numéro.
 - Une batterie sans interface SunSpec (firmware plus ancien, ou batterie d'un
   groupe qui la laisse à la maîtresse) prend le nom de son adresse
   (`ip192-168-1-51-502`) après trois lectures où son unité 64 a répondu et
@@ -84,28 +86,15 @@ chaque batterie.
   propre appareil apparaît dans la Découverte ; l'ancien ne reçoit plus de
   valeur.
 
-## Compteurs d'énergie retenus
+## Compteurs d'énergie
 
-Les deux compteurs d'énergie de chaque batterie passent par une garde :
-
-- 0 n'est jamais publié ;
-- une **baisse** (remise à zéro, batterie remplacée, ou un compteur de 16 bits
-  qui reprend à zéro) ou un **saut** improbable (plus de 20 kW en moyenne
-  depuis la dernière valeur, avec 0,5 kWh de marge) est **retenu** :
-  la dernière valeur acceptée est renvoyée, l'état de l'intégration l'affiche ;
-  ni le temps ni la répétition ne le lèvent (une valeur revenue à la normale
-  met fin à la retenue) ;
-- s'il est juste, cliquez **deux fois** sur « Accepter le compteur retenu »
-  dans la configuration : le premier clic liste ce qui est retenu, le second
-  (de 3 s à 5 min après) accepte exactement cela ; enregistrer la
-  configuration n'accepte rien.
-
-La garde compte sur l'horloge de la session (l'heure du démarrage plus le
-temps écoulé mesuré par le système), pas sur l'heure murale : une heure
-réglée par NTP pendant le fonctionnement n'élargit pas sa marge. Ce qu'elle
-garde dans /data passe un redémarrage, en heures murales : un seul cas à part,
-une horloge du système en avance de plusieurs heures au redémarrage du
-conteneur élargit d'autant la marge des premières valeurs.
+Les deux compteurs « énergie produite » et « énergie consommée » de chaque
+batterie sont publiés **tels que lus**, en capteurs simples (kWh), jamais
+comptés par le suivi énergétique. SAX ne documente ni leur sens, ni leur
+unité, ni leur nature : ce sont des registres de 16 bits qui peuvent
+**repartir de zéro** (vers 65,5 kWh s'ils sont en Wh) ou être **périodiques**
+(remis à zéro régulièrement). À confirmer sur une vraie batterie. Une valeur 0
+est tenue pour inconnue et n'est jamais publiée.
 
 ## Ce qui n'est pas fait
 
@@ -123,5 +112,5 @@ conteneur élargit d'autant la marge des premières valeurs.
   est sans doute plus ancien que Master V61 / Gateway V54 ; les valeurs du
   système manquent alors.
 - /data illisible : le fichier est laissé tel quel, aucune batterie ne prend le
-  nom de son adresse et les compteurs ne sont pas envoyés ; redémarrez
-  l'intégration.
+  nom de son adresse (une batterie identifiée par son numéro de série reste
+  lue) ; redémarrez l'intégration.

@@ -6,6 +6,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { normalizeConfig, parseAddress } from '../src/config.js';
 import {
   BLOCK,
@@ -18,7 +21,7 @@ import {
 } from '../src/sax/registers.js';
 import { addressId, resolveIdentity, validSlot } from '../src/sax/identity.js';
 import { OUTCOME } from '../src/sax/reader.js';
-import { readState } from '../src/store.js';
+import { createFileStore, readState } from '../src/store.js';
 import { sunspecRegisters, unit40Registers, unit64Registers } from './helpers/fakeSax.js';
 
 const pdu = (words) => {
@@ -72,6 +75,11 @@ test('identity: the SunS marker and model 1 required; serial as two decimal word
   });
   assert.equal(decodeIdentity(sunspecRegisters({ overrides: { 0: 0 } })), undefined);
   assert.equal(decodeIdentity(sunspecRegisters({ overrides: { 2: 2 } })), undefined);
+  // The other well-known words: a common model of length 15 by "SAXPOWER" only.
+  assert.equal(decodeIdentity(sunspecRegisters({ overrides: { 3: 65 } })), undefined);
+  for (const a of [4, 5, 6, 7]) {
+    assert.equal(decodeIdentity(sunspecRegisters({ overrides: { [a]: 0x4652 } })), undefined, a);
+  }
   assert.equal(decodeIdentity(sunspecRegisters({ serial: [0, 0] })).serial, undefined);
   assert.equal(decodeIdentity(sunspecRegisters({ serial: [0xffff, 0xffff] })).serial, undefined);
   assert.equal(decodeIdentity(sunspecRegisters({ overrides: { 8: 0x4142 } })).model, undefined);
@@ -115,6 +123,8 @@ test('SunSpec values: scale factors, not implemented words, ranges', () => {
   assert.equal(decodeBlock(BLOCK.storage, unset).dischargeAvailable, 4600);
   assert.equal(decodeBlock(BLOCK.meter, unset).gridPower, undefined);
   // A model id that is not the documented one: nothing from the block.
+  assert.deepEqual(decodeBlock(BLOCK.inverter, sunspecRegisters({ overrides: { 15: 101 } })), {});
+  assert.deepEqual(decodeBlock(BLOCK.storage, sunspecRegisters({ overrides: { 95: 801 } })), {});
   assert.deepEqual(decodeBlock(BLOCK.meter, sunspecRegisters({ overrides: { 54: 201 } })), {});
   // A negative scale factor is exact.
   const sf = sunspecRegisters({ overrides: { 61: 2303, 69: -1 } });
@@ -126,6 +136,11 @@ test('unit 64: the offset of 16384 and the signed word of sax_battery_ha', () =>
   assert.equal(at(-1500), -1500);
   assert.equal(at(2300), 2300);
   assert.equal(at(0), 0);
+  // The raw words 0 and 0xFFFF (-16 384 and -16 385 W): beyond one battery, not measures.
+  assert.equal(decodeBlock(BLOCK.battery, new Map([[47, 0]])).power, undefined);
+  assert.equal(decodeBlock(BLOCK.battery, new Map([[47, 0xffff]])).power, undefined);
+  assert.equal(at(9000), 9000);
+  assert.equal(at(-10_001), undefined);
   // raw 0xC000 and above: below -16384 after the reference's formula, not a measure.
   assert.equal(decodeBlock(BLOCK.battery, new Map([[47, 0xc100]])).power, undefined);
   assert.equal(decodeBlock(BLOCK.battery, new Map([[46, 101]])).soc, undefined);
@@ -188,6 +203,11 @@ test('configuration: up to three addresses, the master first, port 502 by defaul
     host: 'fe80::1',
     port: 502,
   });
+  assert.deepEqual(parseAddress('http://user:pw@192.168.1.50'), {
+    error: 'invalid',
+    reason: 'credentials',
+  });
+  assert.deepEqual(parseAddress('user@192.168.1.50'), { error: 'invalid', reason: 'credentials' });
   for (const bad of ['0.0.0.0', '239.1.1.1', 'a:0', 'a:70000', 'u@h', '[ff02::1]', '::']) {
     assert.equal(parseAddress(bad).error, 'invalid', bad);
   }
@@ -220,7 +240,7 @@ test('/data read back: checked field by field, no prototype, never in the future
         __proto__: { serial: '1-1' },
       },
       info: { 'sn12-34': { model: 'SAX Power Home', versionMaster: 61 }, '../x': {} },
-      counters: { 'ext:sax-power:battery:sn12-34:energy_produced': { guard: {} }, x: {} },
+      counters: { 'ext:sax-power:battery:sn12-34:energy_produced': { guard: {} } },
     },
     1000,
   );
@@ -233,11 +253,32 @@ test('/data read back: checked field by field, no prototype, never in the future
   });
   assert.equal(Object.getPrototypeOf(state.slots), null);
   assert.deepEqual(Object.keys(state.info), ['sn12-34']);
-  assert.deepEqual(Object.keys(state.counters), ['ext:sax-power:battery:sn12-34:energy_produced']);
+  assert.equal(state.counters, undefined, 'the guards of release 0 are gone');
   assert.deepEqual(JSON.parse(JSON.stringify(readState('garbage', 5))), {
     lastAttemptAt: 0,
     slots: {},
     info: {},
-    counters: {},
   });
+});
+
+test('/data on disk: absent = empty; broken, too big, not an object or unreadable = unreadable', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'sax-store-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'state.json');
+  const store = createFileStore(file);
+  assert.deepEqual(store.load(), { data: {} });
+  await store.save({ lastAttemptAt: 1, slots: {} });
+  assert.deepEqual(store.load(), { data: { lastAttemptAt: 1, slots: {} } });
+  assert.deepEqual(readdirSync(dir), ['state.json'], 'written through a temporary file, renamed');
+  // Saves one after the other: the last one wins.
+  await Promise.all([store.save({ n: 1 }), store.save({ n: 2 }), store.save({ n: 3 })]);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { n: 3 });
+  for (const text of ['{broken', '[1,2]', 'null', `{"x":"${'a'.repeat(70 * 1024)}"}`]) {
+    writeFileSync(file, text);
+    assert.deepEqual(store.load(), { unreadable: true }, text.slice(0, 10));
+  }
+  writeFileSync(file, '{}');
+  chmodSync(file, 0o000);
+  if (process.getuid?.() !== 0) assert.deepEqual(store.load(), { unreadable: true });
+  chmodSync(file, 0o600);
 });

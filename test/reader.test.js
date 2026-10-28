@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { BatteryReader, OUTCOME } from '../src/sax/reader.js';
 import { TIMINGS } from '../src/constants.js';
+import { tcpServer } from './kit/tcp.mjs';
 import {
   recordingConnect,
   startFakeSax,
@@ -203,7 +204,8 @@ test('a whole read is bounded: a slow battery is cut at the budget', async (t) =
   const started = performance.now();
   const result = await reader(sax).read();
   assert.ok(performance.now() - started < 900, 'cut at the budget');
-  assert.equal(result.error, 'aborted');
+  // Over budget is a failure of the battery, never a stop.
+  assert.equal(result.error, 'timeout');
   assert.ok(sax.requests.length < 7);
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(sax.device.open, 0);
@@ -222,4 +224,104 @@ test('abort ends a read at once and closes its connection', async (t) => {
   assert.equal(result.error, 'aborted');
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(sax.device.open, 0);
+});
+
+test('an answer of another size is a protocol failure (never "aborted")', async (t) => {
+  // A device that answers every read with one word more than asked.
+  const device = await tcpServer({
+    onData: (c) => {
+      const count = c.readUInt16BE(10) + 1;
+      const pdu = Buffer.alloc(2 + count * 2);
+      pdu[0] = 3;
+      pdu[1] = count * 2;
+      const head = Buffer.alloc(7);
+      head.writeUInt16BE(c.readUInt16BE(0), 0);
+      head.writeUInt16BE(pdu.length + 1, 4);
+      head[6] = c[6];
+      return Buffer.concat([head, pdu]);
+    },
+  });
+  t.after(() => device.close());
+  const r = new BatteryReader({ host: '127.0.0.1', port: device.port, master: false, gap: 20 });
+  const result = await r.read();
+  assert.equal(result.error, 'protocol');
+  assert.equal(result.outcomes.identity, OUTCOME.FAILED);
+  assert.ok(!Object.values(result.outcomes).includes(OUTCOME.OK));
+  assert.equal(device.connections, 3, 'each odd answer ends its connection');
+});
+
+test('the connections of a read are bounded: three at most, the rest skipped', async (t) => {
+  const sax = await startFakeSax({ silentUnits: [100, 64, 40] });
+  t.after(() => sax.close());
+  const old = TIMINGS.requestTimeout;
+  TIMINGS.requestTimeout = 100;
+  t.after(() => {
+    TIMINGS.requestTimeout = old;
+  });
+  const result = await reader(sax).read();
+  assert.equal(sax.device.connections, 3);
+  assert.equal(sax.requests.length, 3);
+  assert.deepEqual(Object.values(result.outcomes).filter((o) => o === OUTCOME.SKIPPED).length, 4);
+  assert.equal(result.error, 'timeout');
+});
+
+test('only exceptions 1 and 2 turn a block to single reads; exception 4 fails it, same connection', async (t) => {
+  const sax = await startFakeSax({ wholeException: 4 });
+  t.after(() => sax.close());
+  const r = reader(sax, { master: false });
+  const result = await r.read();
+  assert.ok(Object.values(result.outcomes).every((o) => o === OUTCOME.FAILED));
+  assert.ok(
+    sax.requests.every((q) => q.count > 1),
+    'never register by register',
+  );
+  assert.equal(sax.device.connections, 1);
+  await r.read();
+  assert.ok(sax.requests.every((q) => q.count > 1));
+});
+
+test('a register silent in single reads ends the block and its connection', async (t) => {
+  const sax = await startFakeSax({ wholeRefused: true, silentAddresses: ['64:46'] });
+  t.after(() => sax.close());
+  const old = TIMINGS.requestTimeout;
+  TIMINGS.requestTimeout = 150;
+  t.after(() => {
+    TIMINGS.requestTimeout = old;
+  });
+  const result = await reader(sax, { master: false }).read();
+  assert.equal(result.outcomes.battery, OUTCOME.FAILED);
+  assert.equal(result.values.soc, undefined);
+  assert.equal(result.values.status, undefined, 'nothing of the block kept');
+  assert.equal(result.outcomes.details, OUTCOME.OK);
+  assert.equal(sax.device.connections, 2);
+});
+
+test('a new connection of a read starts with the serial: another battery there gives nothing', async (t) => {
+  const other = {
+    100: sunspecRegisters({ serial: [9999, 1] }),
+    64: unit64Registers({ soc: 11 }),
+    40: unit40Registers({ cycles: 999 }),
+  };
+  const sax = await startFakeSax({
+    silentAddresses: ['64:45'],
+    unitsFor: (conn) => (conn.id === 1 ? undefined : other),
+  });
+  t.after(() => sax.close());
+  const old = TIMINGS.requestTimeout;
+  TIMINGS.requestTimeout = 150;
+  t.after(() => {
+    TIMINGS.requestTimeout = old;
+  });
+  const result = await reader(sax, { master: false }).read();
+  assert.equal(result.identity.serial, '1234-56');
+  assert.equal(result.outcomes.battery, OUTCOME.FAILED);
+  assert.equal(result.identityLost, true);
+  assert.equal(result.values.cycles, undefined, 'nothing of the other battery');
+  assert.equal(result.error, 'timeout');
+  // The same battery on the new connection: the read goes on.
+  const same = await startFakeSax({ silentAddresses: ['64:45'] });
+  t.after(() => same.close());
+  const ok = await reader(same, { master: false }).read();
+  assert.equal(ok.identityLost, undefined);
+  assert.equal(ok.values.cycles, 210);
 });

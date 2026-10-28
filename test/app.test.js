@@ -19,7 +19,6 @@ import {
   DEVICE_B,
   FA,
   FB,
-  HOUR,
   ID_A,
   MINUTE,
   POLL,
@@ -292,7 +291,7 @@ test('a battery known by its serial never falls back to its address', async () =
   await app.stop();
 });
 
-test('/data unreadable: no fallback identity, no counter, never written over', async () => {
+test('/data unreadable: no fallback identity, never written over; the values go', async () => {
   const store = createMemoryStore({}, { unreadable: true });
   const { app, gladys, advance } = await setup({
     store,
@@ -308,190 +307,10 @@ test('/data unreadable: no fallback identity, no counter, never written over', a
   assert.equal(gladys.fake.discoveredDevices.length, 1);
   assert.equal(gladys.fake.discoveredDevices[0].external_id, DEVICE_A);
   assert.equal(last(gladys, FA('soc')), 76);
-  assert.equal(last(gladys, FA('energy_produced')), undefined);
+  assert.equal(last(gladys, FA('energy_produced')), 12.345);
   assert.equal(store.saves, 0);
   assert.match(status(gladys).message.en, /cannot be read/);
   await app.stop();
-});
-
-test('/data unreadable: a counter never reaches the states, even before the save', async () => {
-  const store = createMemoryStore({}, { unreadable: true });
-  const { app } = await setup({ store, devices: [created()] });
-  await app.start(CONFIG);
-  await app.idle();
-  const slot = app.slots[0];
-  const states = app.prepare(slot, slot.values, { counters: true });
-  assert.ok(states.some((s) => s.device_feature_external_id === FA('soc')));
-  assert.ok(!states.some((s) => /energy_/.test(s.device_feature_external_id)));
-  assert.equal(app.guards.size, 0);
-  await app.stop();
-});
-
-test('session clock: the date Gladys gives is turned to the session clock (wall set back)', async () => {
-  let produced = 12.345;
-  const device = created();
-  const {
-    app,
-    gladys,
-    advance,
-    wall,
-    clock: c,
-  } = await setup({
-    devices: [],
-    script: () => result({ values: { energyProduced: produced } }),
-  });
-  await app.start(CONFIG);
-  await app.idle();
-  // NTP sets the wall clock 3 h back; then the user creates the device, which
-  // holds 12.345 kWh dated by Gladys on that wall clock.
-  wall.jump = -3 * HOUR;
-  const feature = device.features.find((f) => f.external_id === FA('energy_produced'));
-  feature.last_value = 12.345;
-  feature.last_value_changed = new Date(START + c.elapsed - 3 * HOUR).toISOString();
-  gladys.fake.devices.push(device);
-  await gladys.fake.deviceCreated(device);
-  await app.idle();
-  // +30 kWh in 35 s: held (never "3 h of margin" from the wall date).
-  produced = 42.345;
-  await advance(POLL + 5 * SECOND);
-  assert.equal(last(gladys, FA('energy_produced')), 12.345);
-  assert.match(status(gladys).message.en, /jumped from 12\.345 to 42\.345 kWh/);
-  await app.stop();
-});
-
-test('/data that cannot be written: the counters are not sent, the other values are', async () => {
-  const store = createMemoryStore({}, { failSave: true });
-  const { app, gladys } = await setup({ store, devices: [created()] });
-  await app.start(CONFIG);
-  await app.idle();
-  assert.equal(last(gladys, FA('soc')), 76);
-  assert.equal(last(gladys, FA('energy_produced')), undefined);
-  assert.match(status(gladys).message.en, /cannot be written/);
-  await app.stop();
-});
-
-test('counters: never 0, a drop held (the last value sent again), accepted in two clicks only', async () => {
-  let produced = 12.345;
-  const { app, gladys, advance } = await setup({
-    devices: [created()],
-    script: () => result({ values: { energyProduced: produced } }),
-  });
-  await app.start(CONFIG);
-  await app.idle();
-  assert.equal(last(gladys, FA('energy_produced')), 12.345);
-  produced = 0;
-  await advance(POLL + 5 * SECOND);
-  assert.ok(!statesOf(gladys, FA('energy_produced')).includes(0), 'never 0');
-  produced = 2.5;
-  await advance(POLL + 5 * SECOND);
-  assert.ok(statesOf(gladys, FA('energy_produced')).every((v) => v === 12.345));
-  assert.match(
-    status(gladys).message.en,
-    /energy produced": dropped from 12\.345 to 2\.5 kWh, held back/,
-  );
-  // A save of the form accepts nothing.
-  await app.start(CONFIG, { fresh: true });
-  await advance(POLL + 5 * SECOND);
-  assert.equal(last(gladys, FA('energy_produced')), 12.345);
-  // First click lists; a second click too soon only lists again.
-  assert.match(
-    (await action(gladys, ACTIONS.ACCEPT_HELD)).en,
-    /A second click accepts exactly these values: Battery A, energy produced: 12\.345 → 2\.5 kWh/,
-  );
-  assert.match((await action(gladys, ACTIONS.ACCEPT_HELD)).en, /A second click accepts/);
-  await advance(5 * SECOND);
-  assert.match(
-    (await action(gladys, ACTIONS.ACCEPT_HELD)).en,
-    /Accepted: Battery A, energy produced 2\.5 kWh/,
-  );
-  await advance(POLL + 5 * SECOND);
-  assert.equal(last(gladys, FA('energy_produced')), 2.5);
-  assert.doesNotMatch(status(gladys).message.en, /held back/);
-  await app.stop();
-});
-
-test('counters: the second click takes only the value listed (plus the margin since)', async () => {
-  let produced = 12.345;
-  const { app, gladys, advance } = await setup({
-    devices: [created()],
-    script: () => result({ values: { energyProduced: produced } }),
-  });
-  await app.start(CONFIG);
-  await app.idle();
-  produced = 2.5;
-  await advance(POLL + 5 * SECOND);
-  assert.match((await action(gladys, ACTIONS.ACCEPT_HELD)).en, /12\.345 → 2\.5 kWh/);
-  // Before the second click, the held value moves by far more than 35 s may add.
-  produced = 9;
-  await advance(POLL + 5 * SECOND);
-  assert.match(
-    (await action(gladys, ACTIONS.ACCEPT_HELD)).en,
-    /Not accepted, the value changed since the first click: Battery A, energy produced/,
-  );
-  await advance(POLL + 5 * SECOND);
-  assert.equal(last(gladys, FA('energy_produced')), 12.345);
-  await app.stop();
-});
-
-test('counters: a jump is held whatever the time, a later value at or above it too', async () => {
-  let produced = 12.345;
-  const { app, gladys, advance } = await setup({
-    devices: [created()],
-    script: () => result({ values: { energyProduced: produced } }),
-  });
-  await app.start(CONFIG);
-  await app.idle();
-  produced = 60; // +47.6 kWh in 35 s: far beyond 20 kW
-  await advance(POLL + 5 * SECOND);
-  assert.equal(last(gladys, FA('energy_produced')), 12.345);
-  for (let i = 0; i < 6; i += 1) {
-    produced += 0.01;
-    await advance(HOUR);
-  }
-  assert.equal(last(gladys, FA('energy_produced')), 12.345, 'never taken by time');
-  await app.stop();
-});
-
-test('session clock: NTP setting the wall clock 3 h ahead never widens the margin of a jump', async () => {
-  let produced = 12.345;
-  const { app, gladys, advance, wall } = await setup({
-    devices: [created()],
-    script: () => result({ values: { energyProduced: produced } }),
-  });
-  await app.start(CONFIG);
-  await app.idle();
-  wall.jump = 3 * HOUR;
-  // +30 kWh: plausible over 3 h at 20 kW on the wall clock, not over 35 s.
-  produced = 42.345;
-  await advance(POLL + 5 * SECOND);
-  assert.equal(last(gladys, FA('energy_produced')), 12.345);
-  assert.match(status(gladys).message.en, /jumped from 12\.345 to 42\.345 kWh/);
-  await app.stop();
-});
-
-test('session clock: a hold and its reference survive a restart with the wall clock set back', async () => {
-  const store = createMemoryStore();
-  let produced = 12.345;
-  const script = () => result({ values: { energyProduced: produced } });
-  const first = await setup({ store, devices: [created()], script });
-  await first.app.start(CONFIG);
-  await first.app.idle();
-  produced = 5;
-  await first.advance(POLL + 5 * SECOND);
-  await first.app.stop();
-  assert.equal(store.data.counters[FA('energy_produced')].guard.held.to, 5);
-  // A new process, its wall clock 2 h behind (NTP not yet set).
-  const second = await setup({
-    store,
-    devices: [created()],
-    script,
-    clock: testClock({ start: START - 2 * HOUR }),
-  });
-  await second.app.start(CONFIG);
-  await second.advance(2 * MINUTE);
-  assert.equal(last(second.gladys, FA('energy_produced')), 12.345);
-  assert.match(status(second.gladys).message.en, /dropped from 12\.345 to 5 kWh/);
-  await second.app.stop();
 });
 
 test('nothing stale: a reconnection republishes no value before the next read', async () => {
@@ -617,4 +436,106 @@ test('blocks not read are listed in the status; the energies missing never publi
 
 test('the id rule: no dot nor colon in the platform id', () => {
   assert.doesNotMatch(ID_A, /[.:]/);
+});
+
+test('energy counters: published as read, a drop too; 0 is unknown, never published; no hold', async () => {
+  let produced = 65.53;
+  const { app, gladys, advance } = await setup({
+    devices: [created()],
+    script: () => result({ values: { energyProduced: produced, energyConsumed: 0 } }),
+  });
+  await app.start(CONFIG);
+  await app.idle();
+  assert.equal(last(gladys, FA('energy_produced')), 65.53);
+  assert.equal(last(gladys, FA('energy_consumed')), undefined, '0 is never published');
+  produced = 0.12; // a 16-bit counter starting over, or a periodic one
+  await advance(POLL + 5 * SECOND);
+  assert.equal(last(gladys, FA('energy_produced')), 0.12);
+  produced = 0;
+  await advance(POLL + 5 * SECOND);
+  assert.ok(!statesOf(gladys, FA('energy_produced')).includes(0));
+  assert.doesNotMatch(status(gladys).message.en, /held/);
+  assert.deepEqual(Object.keys(app.kept), ['lastAttemptAt', 'slots', 'info']);
+  await app.stop();
+});
+
+test('/data that cannot be written: the values are sent, the status says so', async () => {
+  const store = createMemoryStore({}, { failSave: true });
+  const { app, gladys } = await setup({ store, devices: [created()] });
+  await app.start(CONFIG);
+  await app.idle();
+  assert.equal(last(gladys, FA('soc')), 76);
+  assert.equal(last(gladys, FA('energy_produced')), 12.345);
+  assert.match(status(gladys).message.en, /cannot be written/);
+  await app.stop();
+});
+
+test('every block failing (an odd answer, the budget): a failure, said, logged, spaced', async () => {
+  for (const [kind, words] of [
+    ['protocol', /answer that is not Modbus TCP/],
+    ['timeout', /no answer in time/],
+  ]) {
+    const failing = () => ({
+      ...unreachable(),
+      reached: true,
+      outcomes: { identity: 'failed', battery: 'skipped' },
+      error: kind,
+    });
+    const { app, gladys, readers, logger, advance } = await setup({
+      devices: [created()],
+      script: (b, n) => (n === 1 ? result() : failing()),
+    });
+    await app.start(CONFIG);
+    await app.idle();
+    assert.equal(status(gladys).connected, true);
+    await advance(POLL + 5 * SECOND);
+    assert.equal(status(gladys).connected, false, kind);
+    assert.match(status(gladys).message.en, words);
+    assert.ok(logger.lines.some((l) => l.includes(`failed: ${kind}`)));
+    // Spaced: not read again before 1 min.
+    await advance(POLL);
+    assert.equal(readers.calls.length, 2);
+    await app.stop();
+  }
+});
+
+test('after a failure, or a read without identity, no value is kept for a device created then', async () => {
+  for (const second of [unreachable(), result({ serial: null })]) {
+    const store = createMemoryStore({ slots: { [ADDRESS_A]: { serial: '1234-56' } } });
+    const { app, gladys, advance } = await setup({
+      store,
+      script: (b, n) => (n === 1 ? result() : second),
+    });
+    await app.start(CONFIG);
+    await app.idle();
+    await advance(POLL + 5 * SECOND);
+    // Nothing of that read is shown as the battery's values either.
+    assert.doesNotMatch((await action(gladys, ACTIONS.TEST)).en, /Values:/);
+    const device = created();
+    gladys.fake.devices.push(device);
+    await gladys.fake.deviceCreated(device);
+    await app.idle();
+    assert.equal(last(gladys, FA('soc')), undefined);
+    await app.stop();
+  }
+});
+
+test('270 states per minute at most: a batch beyond waits for the next read', async () => {
+  const { app, gladys, advance } = await setup();
+  await app.start(CONFIG);
+  await app.idle();
+  const batch = (n, offset = 0) =>
+    Array.from({ length: n }, (_, i) => ({
+      device_feature_external_id: `${DEVICE_A}:x${i + offset}`,
+      state: i,
+    }));
+  await app.send(batch(200));
+  await app.send(batch(100, 200));
+  assert.equal(gladys.fake.states.length, 200);
+  await app.send(batch(70, 400));
+  assert.equal(gladys.fake.states.length, 270);
+  await advance(61 * SECOND);
+  await app.send(batch(100, 500));
+  assert.equal(gladys.fake.states.length, 370);
+  await app.stop();
 });

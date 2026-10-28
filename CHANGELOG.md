@@ -25,8 +25,9 @@ the notes of the version's GitHub Release.
   register; a block failing three reads in a row is skipped for ten.
 - Identity: the SunSpec serial number read with the values; a battery without
   SunSpec is named after its address after three reads.
-- A guard on both energy counters, on the session clock: never 0, a drop or a
-  jump held back and said in the status, taken only by "Accept the held
-  counter" clicked twice.
+- The two energy counters published as read (0 never published, never in the
+  energy monitoring); they may start over from zero or be periodic.
+- Identity read again at the start of every new connection of a read; the
+  well-known words "SunS", 15 and "SAXPOWER" checked.
 - After a restart of the container, the first read waits the interval and one
   minute after the last read.

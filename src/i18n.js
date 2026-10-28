@@ -37,12 +37,6 @@ const REASON = {
 
 export const reason = (kind) => REASON[kind] ?? { en: 'unexpected error', fr: 'erreur inattendue' };
 
-/** The counters in the texts (src/devices.js COUNTERS names). */
-export const COUNTER_NAMES = {
-  produced: { en: 'energy produced', fr: 'énergie produite' },
-  consumed: { en: 'energy consumed', fr: 'énergie consommée' },
-};
-
 /** The blocks in the texts (src/sax/registers.js keys). */
 const BLOCK_NAMES = {
   identity: { en: 'serial number (SunSpec)', fr: 'numéro de série (SunSpec)' },
@@ -53,8 +47,6 @@ const BLOCK_NAMES = {
   details: { en: 'details (unit 40)', fr: 'détails (unité 40)' },
   energy: { en: 'energy counters (unit 40)', fr: 'compteurs d’énergie (unité 40)' },
 };
-
-const kwh = (value) => Math.round(value * 1000) / 1000;
 
 const sentences = (lang, list) => list.map((n) => n[lang]).join(' ');
 const both = (list) => ({ en: sentences('en', list), fr: sentences('fr', list) });
@@ -69,19 +61,6 @@ const name = (field, address) => {
     en: `Battery ${letter}${address ? ` (${address})` : ''}`,
     fr: `Batterie ${letter}${address ? ` (${address})` : ''}`,
   };
-};
-
-const heldLine = ({ name: counter, battery, direction, from, to }) => {
-  const who = name(battery);
-  return direction === 'down'
-    ? {
-        en: `${who.en}, counter "${COUNTER_NAMES[counter].en}": dropped from ${kwh(from)} to ${kwh(to)} kWh, held back (the last accepted value is sent again).`,
-        fr: `${who.fr}, compteur « ${COUNTER_NAMES[counter].fr} » : baisse de ${kwh(from)} à ${kwh(to)} kWh, retenue (la dernière valeur acceptée est renvoyée).`,
-      }
-    : {
-        en: `${who.en}, counter "${COUNTER_NAMES[counter].en}": jumped from ${kwh(from)} to ${kwh(to)} kWh, held back (the last accepted value is sent again).`,
-        fr: `${who.fr}, compteur « ${COUNTER_NAMES[counter].fr} » : saut de ${kwh(from)} à ${kwh(to)} kWh, retenu (la dernière valeur acceptée est renvoyée).`,
-      };
 };
 
 const NOTE = {
@@ -181,68 +160,13 @@ export const T = {
   ok: (views, notes = []) => both([...views.map(batteryLine), ...notes]),
   notes: {
     storeUnreadable: {
-      en: 'The file of the integration in /data cannot be read: it is left as it is, no battery is named after its address and the energy counters are not sent until it can be read again (restart the integration).',
-      fr: 'Le fichier de l’intégration dans /data est illisible : il est laissé tel quel, aucune batterie ne prend le nom de son adresse et les compteurs d’énergie ne sont pas envoyés tant qu’il ne peut pas être relu (redémarrez l’intégration).',
+      en: 'The file of the integration in /data cannot be read: it is left as it is, and no battery is named after its address until it can be read again (restart the integration).',
+      fr: 'Le fichier de l’intégration dans /data est illisible : il est laissé tel quel, et aucune batterie ne prend le nom de son adresse tant qu’il ne peut pas être relu (redémarrez l’intégration).',
     },
     storeFailed: {
-      en: 'The file of the integration in /data cannot be written: the energy counters are not sent meanwhile; the other values are.',
-      fr: 'Le fichier de l’intégration dans /data ne peut pas être écrit : les compteurs d’énergie ne sont pas envoyés entre-temps ; les autres valeurs le sont.',
+      en: 'The file of the integration in /data cannot be written: what the integration learns (identities, the time of the last read) is not kept for a restart meanwhile; the values are sent.',
+      fr: 'Le fichier de l’intégration dans /data ne peut pas être écrit : ce que l’intégration apprend (identités, heure de la dernière lecture) n’est pas gardé pour un redémarrage entre-temps ; les valeurs sont envoyées.',
     },
-    held: (held) =>
-      both([
-        ...held.map(heldLine),
-        {
-          en: 'A drop or a jump is never taken by itself. If the counter was really reset (or the battery replaced, or the jump is right), click "Accept the held counter" twice in the configuration of the integration (the first click lists, the second accepts exactly what was listed). Saving the configuration accepts nothing.',
-          fr: 'Une baisse ou un saut n’est jamais pris de lui-même. Si le compteur a vraiment été remis à zéro (ou la batterie remplacée, ou si le saut est juste), cliquez deux fois sur « Accepter le compteur retenu » dans la configuration de l’intégration (le premier clic liste, le second accepte exactement ce qui a été listé). Enregistrer la configuration n’accepte rien.',
-        },
-      ]),
-  },
-  accept: {
-    nothing: {
-      en: 'No counter is held back: nothing to accept.',
-      fr: 'Aucun compteur n’est retenu : rien à accepter.',
-    },
-    confirm: (held, within) =>
-      both([
-        {
-          en: 'A second click accepts exactly these values:',
-          fr: 'Un second clic accepte exactement ces valeurs :',
-        },
-        ...held.map((h) => {
-          const who = name(h.battery);
-          return h.direction === 'down'
-            ? {
-                en: `${who.en}, ${COUNTER_NAMES[h.name].en}: ${kwh(h.from)} → ${kwh(h.to)} kWh (a reset: the counter goes on from ${kwh(h.to)} kWh).`,
-                fr: `${who.fr}, ${COUNTER_NAMES[h.name].fr} : ${kwh(h.from)} → ${kwh(h.to)} kWh (remise à zéro : le compteur reprend à ${kwh(h.to)} kWh).`,
-              }
-            : {
-                en: `${who.en}, ${COUNTER_NAMES[h.name].en}: ${kwh(h.from)} → ${kwh(h.to)} kWh (${kwh(h.to - h.from)} kWh at once).`,
-                fr: `${who.fr}, ${COUNTER_NAMES[h.name].fr} : ${kwh(h.from)} → ${kwh(h.to)} kWh (${kwh(h.to - h.from)} kWh d’un coup).`,
-              };
-        }),
-        {
-          en: `Click "Accept the held counter" again, after a few seconds and within ${delay(within).en}, to accept them; accept only if this is real.`,
-          fr: `Cliquez de nouveau sur « Accepter le compteur retenu », après quelques secondes et dans les ${delay(within).fr}, pour les accepter ; n’acceptez que si c’est réel.`,
-        },
-      ]),
-    done: (accepted, changed, stillHeld) =>
-      both([
-        ...accepted.map((h) => ({
-          en: `Accepted: ${name(h.battery).en}, ${COUNTER_NAMES[h.name].en} ${kwh(h.to)} kWh, sent at the next read.`,
-          fr: `Accepté : ${name(h.battery).fr}, ${COUNTER_NAMES[h.name].fr} ${kwh(h.to)} kWh, envoyé à la prochaine lecture.`,
-        })),
-        ...(changed.length > 0
-          ? [
-              {
-                en: `Not accepted, the value changed since the first click: ${changed.map((h) => `${name(h.battery).en}, ${COUNTER_NAMES[h.name].en}`).join('; ')}. Click again to list it.`,
-                fr: `Non accepté, la valeur a changé depuis le premier clic : ${changed.map((h) => `${name(h.battery).fr}, ${COUNTER_NAMES[h.name].fr}`).join(' ; ')}. Cliquez de nouveau pour la lister.`,
-              },
-            ]
-          : []),
-        ...(stillHeld
-          ? [{ en: 'A different value stays held.', fr: 'Une autre valeur reste retenue.' }]
-          : []),
-      ]),
   },
   test: {
     /** One battery: what the last read gave (values when fresh), or why not, and the pace. */

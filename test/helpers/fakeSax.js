@@ -106,19 +106,32 @@ export function unit40Registers({
 
 /**
  * `options`: `units` (unit id -> Map of registers; a unit left out answers
- * exception 2 to everything), `silentUnits` (never answered), `wholeRefused`
+ * exception 2 to everything), `silentUnits` (never answered), `silentAddresses`
+ * (`unit:address` never answered), `wholeException` (the exception code a
+ * read of more than one register gets: `wholeRefused` is code 2), `unitsFor(conn)`
+ * (the units a connection sees, default `units`), `wholeRefused`
  * (a read of more than one register gets exception 2, as a unit that only
  * takes single reads), `latencyMs`, `singleClient`.
  */
 export async function startFakeSax({
   units = { 100: sunspecRegisters(), 64: unit64Registers(), 40: unit40Registers() },
   silentUnits = [],
+  silentAddresses = [],
   wholeRefused = false,
+  wholeException,
+  unitsFor,
   latencyMs = 0,
   singleClient = false,
 } = {}) {
   const requests = [];
-  const state = { units, silentUnits: new Set(silentUnits), wholeRefused };
+  const state = {
+    units,
+    silentUnits: new Set(silentUnits),
+    silentAddresses: new Set(silentAddresses),
+    wholeRefused,
+    wholeException: wholeException ?? (wholeRefused ? 2 : undefined),
+    unitsFor,
+  };
   const onData = (chunk, conn) => {
     const out = [];
     let at = 0;
@@ -132,7 +145,7 @@ export async function startFakeSax({
       const address = frame.length >= 12 ? frame.readUInt16BE(8) : -1;
       const count = frame.length >= 12 ? frame.readUInt16BE(10) : -1;
       requests.push({ at: performance.now(), conn: conn.id, unit, fc, address, count });
-      if (state.silentUnits.has(unit)) continue;
+      if (state.silentUnits.has(unit) || state.silentAddresses.has(`${unit}:${address}`)) continue;
       const answer = (pdu) => {
         const head = Buffer.alloc(7);
         head.writeUInt16BE(transaction, 0);
@@ -146,8 +159,12 @@ export async function startFakeSax({
         exception(1);
         continue;
       }
-      const regs = state.units[unit];
-      if (!regs || count < 1 || count > 125 || (state.wholeRefused && count > 1)) {
+      const regs = (state.unitsFor?.(conn) ?? state.units)[unit];
+      if (count > 1 && state.wholeException !== undefined) {
+        exception(state.wholeException);
+        continue;
+      }
+      if (!regs || count < 1 || count > 125) {
         exception(2);
         continue;
       }

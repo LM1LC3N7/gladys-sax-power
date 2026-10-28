@@ -17,7 +17,7 @@ import {
 } from '@gladysassistant/integration-sdk';
 import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
 import { ACTIONS, BATTERY_FIELDS, POLL_DEFAULT, POLL_MAX, POLL_MIN } from '../src/constants.js';
-import { CATALOG, COUNTERS, buildDevice } from '../src/devices.js';
+import { CATALOG, buildDevice } from '../src/devices.js';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const manifest = JSON.parse(read('gladys-assistant-integration.json'));
@@ -134,11 +134,10 @@ test('the actions of the manifest are the handlers of the code; read-only', () =
     Object.values(ACTIONS),
   );
   assert.ok(handlers.includes('onAction(ACTIONS.TEST'));
-  assert.ok(handlers.includes('onAction(ACTIONS.ACCEPT_HELD'));
+  assert.deepEqual(Object.values(ACTIONS), ['test_connection'], 'no accept action: no guard');
   assert.ok(handlers.includes("on('connected'"));
   assert.ok(!handlers.includes('onSetValue'), 'no command: read-only');
   assert.ok(!read('index.js').includes('onSetValue'));
-  assert.match(manifest.actions[1].description.en, /First click: lists.*Second click/);
   // Only function 3 is ever built.
   assert.doesNotMatch(read('src/sax/registers.js'), /WRITE|0x06|0x10\b|FC\.WRITE/);
   assert.doesNotMatch(read('src/constants.js'), /WRITE/);
@@ -201,7 +200,7 @@ test('every feature uses a unit the core accepts for its category; keys unique; 
   }
 });
 
-test('no energy monitoring: no index, no grid-sensor; every counter guarded and plain', () => {
+test('no energy monitoring: no index, no grid-sensor; the counters plain, as read', () => {
   const indexTypes = new Set([
     TYPES.ENERGY_SENSOR.INDEX,
     TYPES.ENERGY_PRODUCTION_SENSOR.INDEX,
@@ -220,13 +219,14 @@ test('no energy monitoring: no index, no grid-sensor; every counter guarded and 
     assert.equal(spec.category, C.UNKNOWN, key);
     assert.ok(spec.min < 0, `${key} is signed`);
   }
-  for (const { key } of COUNTERS) {
+  for (const key of ['energy_produced', 'energy_consumed']) {
     const entry = CATALOG.find((e) => e.key === key);
     assert.ok(entry, key);
-    assert.equal(entry.value, undefined, `${key}: only through its guard`);
+    assert.equal(entry.positive, true, `${key}: 0 is unknown`);
     assert.equal(entry.spec.category, C.UNKNOWN, key);
     assert.match(entry.spec.name, /kWh.*not counted/);
   }
+  assert.ok(!existsSync(new URL('../src/guard.js', import.meta.url)), 'no guard on plain sensors');
 });
 
 test('supported_options: every one published follows the rules of the core', () => {

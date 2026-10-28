@@ -25,7 +25,7 @@ export function parseAddress(raw) {
   text = text.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/[/?#].*$/, '');
   // user:password@ never belongs in the address: refused rather than sent around.
   if (text.includes('@')) {
-    return { error: 'invalid' };
+    return { error: 'invalid', reason: 'credentials' };
   }
   const bracketed = /^\[([0-9a-f:.]+)\](?::(\d{1,5}))?$/i.exec(text);
   if (bracketed) {

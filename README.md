@@ -8,9 +8,9 @@ and the others). Read-only. Not affiliated with SAX Power.
 **Never tested with a real device.** Feedback welcome.
 
 - Each battery: state of charge, power (signed), status, temperature, cycles,
-  capacity, and two energy counters shown as plain sensors, each guarded: never
-  0, never a drop nor an implausible jump without a two-click acceptance (one
-  case aside, a system clock hours ahead across a restart: see the user guide).
+  capacity, and two energy counters shown as read as plain sensors (0 never
+  published; undocumented 16-bit registers that may start over from zero or be
+  periodic: to be confirmed on a real battery).
 - The master: the values of the whole system from the SunSpec interface SAX
   documents (state of charge, storage power, state, events, cell temperature,
   available powers, capacity; solar and grid power with the ADW200 meter).

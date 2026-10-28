@@ -19,8 +19,7 @@
       assumed, the reference divides by 1000), their direction (charged or
       discharged: the reference's own comments disagree with its names), and
       whether they are lifetime counters. One 16-bit register each: in Wh they
-      would start over at 65.535 kWh (the guard then holds a drop, two clicks
-      take it). The reference itself adds their value every hour into its
+      would start over at 65.535 kWh. The reference itself adds their value every hour into its
       "cumulative" sensors, which suggests they may not be lifetime counters.
       Until then: plain sensors, never in the energy monitoring.
 - [ ] The sign of the power of unit 64 (register 47, raw - 16384) and of the
@@ -79,13 +78,21 @@
   where unit 64 answered and the identity did not. A serial known at an
   address is required on every later read (never back to the address id). /data
   unreadable: no address id is taken.
-- **Energy**: no index of the energy monitoring, nothing in `energy-sensor`,
-  `grid-sensor` nor `battery-storage` charge / discharge index (see "To
-  confirm"). The two counters are plain sensors through the guard of
-  gladys-openems (gladys-p1-monitor), limits 20 kW and 0.5 kWh, on the session
-  clock (wall at the start + monotonic since), dates kept as wall dates in
-  /data and turned back at load; accepted in two clicks bounded to the values
-  listed.
+- **Energy** (review r1, I1): no index of the energy monitoring, nothing in
+  `energy-sensor`, `grid-sensor` nor `battery-storage` charge / discharge index
+  (see "To confirm"). The two counters are plain sensors published as read, 0
+  being unknown (never published), WITHOUT the guard of release 0: on sensors
+  nothing counts, a guard only froze them and asked two clicks at every wrap or
+  reset. No "Accept the held counter" action, nothing of them in /data.
+- **Failures** (review r1, I2): an answer of another size is a protocol failure,
+  a read over its 45 s budget a timeout; only a stop is "aborted". A read where
+  no block answered is a failure: status, spaced retries, log line.
+- **Identity per connection** (review r1, m1, m2): a new connection of a read
+  reads the SunSpec identity first; another serial (or none) there ends the
+  read, its values are not taken. The identity checks "SunS", model 1, length
+  15 and "SAXPOWER" (well-known words of the SAX table).
+- **One battery's power** (unit 64) bounded to ±10 kW (4.6 kW per battery):
+  the raw words 0 and 0xFFFF are never published.
 - **Solar and grid power** only when the ADW200 meter reads (mean grid voltage
   of model 203 at 100 V at least): without it the registers would read 0, never
   a measure.

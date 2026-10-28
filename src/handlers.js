@@ -15,8 +15,6 @@ export function registerHandlers(gladys, app, logger) {
 
   // Configuration screen buttons.
   gladys.onAction(ACTIONS.TEST, () => app.testConnection());
-  // The only way to take a counter held back, in two clicks (a save of the form never does).
-  gladys.onAction(ACTIONS.ACCEPT_HELD, () => app.acceptHeldCounter());
 
   // Configuration changed by the user: applied one after the other, the last one wins.
   gladys.onConfigUpdated((config) => {

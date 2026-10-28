@@ -4,7 +4,7 @@
 // forever: never rename one.
 // -----------------------------------------------------------------------------
 
-export const ACTIONS = { TEST: 'test_connection', ACCEPT_HELD: 'accept_held_counter' };
+export const ACTIONS = { TEST: 'test_connection' };
 
 /**
  * The external id of a battery: `battery:<id>` (src/sax/identity.js), `<id>`
@@ -57,8 +57,9 @@ export const SKIP_READS = 10;
 /**
  * A battery without a serial number (no SunSpec interface: an older firmware,
  * or a battery of a group that leaves it to the master) gets an id from its
- * address only after its SunSpec unit refused this many reads in a row (never
- * after a timeout: maybe the display refreshing).
+ * address only after this many reads in a row where its unit 64 answered and
+ * its SunSpec identity did not (refused, unmarked or silent alike; a read
+ * where the identity was skipped counts nothing).
  */
 export const FALLBACK_AFTER = 3;
 
@@ -86,22 +87,18 @@ export const RETRY_MAX = 15 * MINUTE;
 export const CONFIG_RETRY = [5 * SECOND, 15 * SECOND, 30 * SECOND, MINUTE];
 /** The test button answers within this delay. */
 export const TEST_ANSWER_WITHIN = 25 * SECOND;
-/** The second click of "Accept the held counter" counts from 3 s to 5 min after the first. */
-export const ACCEPT_CONFIRM_AFTER = 3 * SECOND;
-export const ACCEPT_CONFIRM_WITHIN = 5 * MINUTE;
 /** Values older than this many intervals are no longer published as current. */
 export const FRESH_INTERVALS = 2;
 
 // --- Values ---------------------------------------------------------------------------
-/**
- * The margin of the guard of the energy counters (src/guard.js): a SAX Power
- * Home gives at most 4.6 kW per battery (SunSpec 40053: 4,600 / 9,200 /
- * 13,800 W for one to three); 20 kW covers that with room, 0.5 kWh is always
- * accepted on top.
- */
-export const COUNTER_LIMITS = { maxKw: 20, slackKwh: 0.5 };
 /** A power beyond this (W, either sign) is not a measure. */
 export const POWER_MAX = 20_000;
+/**
+ * The power of ONE battery (unit 64) beyond this (W, either sign) is not a
+ * measure: a SAX Power Home gives 4.6 kW at most (SunSpec 40053); the raw
+ * words 0 and 0xFFFF (-16 384 and -16 385 W after the offset) are refused.
+ */
+export const BATTERY_POWER_MAX = 10_000;
 /** An energy counter above this (kWh) is not a measure. */
 export const ENERGY_MAX = 1_000_000;
 /** Temperatures outside this range (°C) are not measures. */

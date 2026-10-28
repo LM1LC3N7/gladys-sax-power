@@ -11,7 +11,8 @@
 //   Its table numbers the registers 40000-40114; on the wire they are 0-114
 //   (sax_battery_ha, checked there live register by register). The fixed
 //   "well-known" words are checked on every read (the "SunS" marker, the
-//   model ids 1, 103, 203 and 802): a block whose marker is not there holds
+//   common model 1 of length 15 by "SAXPOWER", the model ids 103, 203 and
+//   802): a block whose marker is not there holds
 //   no value. The SAX documentation advises reading only the master of a
 //   group (it holds the values of the whole system): the system blocks are
 //   read on battery A only;
@@ -28,11 +29,22 @@
 // unsigned) or scale factor, or a value out of its range is unknown, never 0.
 // -----------------------------------------------------------------------------
 
-import { FC, MAX_READ, POWER_MAX, SF_MAX, SF_MIN, TEMP_MAX, TEMP_MIN } from '../constants.js';
+import {
+  BATTERY_POWER_MAX,
+  FC,
+  MAX_READ,
+  POWER_MAX,
+  SF_MAX,
+  SF_MIN,
+  TEMP_MAX,
+  TEMP_MIN,
+} from '../constants.js';
 
 const SUNSPEC = 100;
 /** The "SunS" marker (SAX documentation, 40000-40001) and the model id of "Common". */
 export const SUNS = [21365, 28243];
+/** "SAXPOWER" (SAX documentation, 40004-40007, well-known). */
+export const SAXPOWER = [21313, 22608, 20311, 17746];
 
 /**
  * The blocks, in the order of a read: the identity first (every value of a
@@ -50,7 +62,16 @@ export const BLOCKS = [
     unit: SUNSPEC,
     address: 0,
     count: 15,
-    checks: { 0: SUNS[0], 1: SUNS[1], 2: 1 },
+    checks: {
+      0: SUNS[0],
+      1: SUNS[1],
+      2: 1,
+      3: 15,
+      4: SAXPOWER[0],
+      5: SAXPOWER[1],
+      6: SAXPOWER[2],
+      7: SAXPOWER[3],
+    },
     points: [8, 9, 10, 11, 12, 13, 14],
   },
   {
@@ -234,7 +255,7 @@ export function decodeBlock(block, map) {
       if (isWord(raw)) {
         let power = raw - 16384;
         if (power >= 0x8000) power -= 0x10000;
-        set('power', within(power, -POWER_MAX, POWER_MAX));
+        set('power', within(power, -BATTERY_POWER_MAX, BATTERY_POWER_MAX));
       }
       break;
     }
