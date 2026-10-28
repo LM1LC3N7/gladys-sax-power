@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-28
+
 ### Added
 
 - SAX Power Home / Home Plus batteries read locally over Modbus TCP, read-only:
@@ -31,3 +33,6 @@ the notes of the version's GitHub Release.
   well-known words "SunS", 15 and "SAXPOWER" checked.
 - After a restart of the container, the first read waits the interval and one
   minute after the last read.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-sax-power/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-sax-power/releases/tag/v0.1.1

@@ -1,6 +1,6 @@
 {
   "name": "gladys-sax-power",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "SAX Power Home and Home Plus home batteries for Gladys Assistant: state of charge, powers, temperatures, cycles, energy counters and the system values of the master, read locally over Modbus TCP, one or several batteries. Read-only.",
   "type": "module",
